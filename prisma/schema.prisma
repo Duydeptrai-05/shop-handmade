@@ -1,0 +1,80 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model Category {
+  id       Int       @id @default(autoincrement())
+  name     String    @unique @db.VarChar(255)
+  products Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id          Int     @id @default(autoincrement())
+  name        String  @db.VarChar(255)
+  description String? @db.Text
+  price       Decimal @db.Decimal(10, 2)
+  imageUrl    String? @map("image_url") @db.VarChar(500)
+  stock       Int     @default(0)
+  isActive    Boolean @default(true) @map("is_active")
+  categoryId  Int     @map("category_id")
+
+  category   Category    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  orderItems OrderItem[]
+
+  @@index([isActive, categoryId])
+  @@map("products")
+}
+
+enum OrderStatus {
+  pending
+  confirmed
+  shipped
+  completed
+}
+
+model Order {
+  id           Int         @id @default(autoincrement())
+  customerName String      @map("customer_name") @db.VarChar(255)
+  phone        String      @db.VarChar(50)
+  address      String      @db.VarChar(255)
+  status       OrderStatus @default(pending)
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  orderItems OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id           Int     @id @default(autoincrement())
+  orderId      Int     @map("order_id")
+  productId    Int     @map("product_id")
+  quantity     Int
+  priceAtOrder Decimal @map("price_at_order") @db.Decimal(10, 2)
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, productId])
+  @@map("order_items")
+}
+
+model Admin {
+  id           Int    @id @default(autoincrement())
+  username     String @unique @db.VarChar(255)
+  passwordHash String @map("password_hash") @db.VarChar(255)
+
+  @@map("admins")
+}
