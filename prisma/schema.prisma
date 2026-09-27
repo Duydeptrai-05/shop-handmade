@@ -1,7 +1,9 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// ============================================================
+// Prisma schema - Shop handmade
+// Provider: MariaDB (dùng provider "mysql", MariaDB tương thích
+// giao thức MySQL nên Prisma dùng chung provider này)
+// Lưu ý: mọi lệnh Prisma phải kèm --config prisma7.config.ts
+// ============================================================
 
 generator client {
   provider = "prisma-client"
@@ -12,68 +14,128 @@ datasource db {
   provider = "mysql"
 }
 
+// ------------------------------------------------------------
+// Category
+// ------------------------------------------------------------
 model Category {
   id       Int       @id @default(autoincrement())
-  name     String    @unique @db.VarChar(255)
+  name     String    @unique @db.VarChar(100)
   products Product[]
 
   @@map("categories")
 }
 
+// ------------------------------------------------------------
+// Product
+// ------------------------------------------------------------
 model Product {
-  id          Int     @id @default(autoincrement())
-  name        String  @db.VarChar(255)
-  description String? @db.Text
-  price       Decimal @db.Decimal(10, 2)
-  imageUrl    String? @map("image_url") @db.VarChar(500)
-  stock       Int     @default(0)
-  isActive    Boolean @default(true) @map("is_active")
-  categoryId  Int     @map("category_id")
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  price       Decimal  @db.Decimal(12, 2)
+  imageUrl    String?  @map("image_url") @db.VarChar(500)
+  stock       Int      @default(0)
+  isActive    Boolean  @default(true) @map("is_active") // soft delete
+  categoryId  Int      @map("category_id")
 
-  category   Category    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  category   Category    @relation(fields: [categoryId], references: [id])
   orderItems OrderItem[]
+  reviews    Review[]
 
-  @@index([isActive, categoryId])
+  @@index([categoryId])
   @@map("products")
 }
 
+// ------------------------------------------------------------
+// Customer
+// ------------------------------------------------------------
+model Customer {
+  id           Int    @id @default(autoincrement())
+  name         String @db.VarChar(255)
+  email        String @unique @db.VarChar(255)
+  phone        String? @db.VarChar(20)
+  passwordHash String @map("password_hash") @db.VarChar(255) // bcryptjs
+
+  orders  Order[]
+  reviews Review[]
+
+  @@map("customers")
+}
+
+// ------------------------------------------------------------
+// Order
+// ------------------------------------------------------------
 enum OrderStatus {
   pending
   confirmed
   shipped
   completed
+  cancelled
 }
 
 model Order {
   id           Int         @id @default(autoincrement())
-  customerName String      @map("customer_name") @db.VarChar(255)
-  phone        String      @db.VarChar(50)
-  address      String      @db.VarChar(255)
+  customerId   Int         @map("customer_id") // bắt buộc, lấy từ JWT token, không nullable
+  customerName String      @map("customer_name") @db.VarChar(255) // tên người nhận, có thể khác tên tài khoản
+  phone        String      @db.VarChar(20)
+  address      String      @db.VarChar(500)
   status       OrderStatus @default(pending)
   createdAt    DateTime    @default(now()) @map("created_at")
 
+  customer   Customer    @relation(fields: [customerId], references: [id])
   orderItems OrderItem[]
 
+  @@index([customerId])
   @@map("orders")
 }
 
+// ------------------------------------------------------------
+// OrderItem
+// ------------------------------------------------------------
 model OrderItem {
   id           Int     @id @default(autoincrement())
   orderId      Int     @map("order_id")
   productId    Int     @map("product_id")
   quantity     Int
-  priceAtOrder Decimal @map("price_at_order") @db.Decimal(10, 2)
+  priceAtOrder Decimal @map("price_at_order") @db.Decimal(12, 2) // giá "đóng băng" tại thời điểm đặt
 
   order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  product Product @relation(fields: [productId], references: [id])
 
-  @@unique([orderId, productId])
+  @@index([orderId])
+  @@index([productId])
   @@map("order_items")
 }
 
+// ------------------------------------------------------------
+// Review
+// Chỉ tạo được nếu Customer có Order chứa product_id đó với
+// status = completed — điều kiện này check ở tầng API,
+// UNIQUE(productId, customerId) chặn trùng ở tầng DB.
+// ------------------------------------------------------------
+model Review {
+  id         Int      @id @default(autoincrement())
+  productId  Int      @map("product_id")
+  customerId Int      @map("customer_id")
+  rating     Int      // 1-5, validate ở tầng API/zod
+  comment    String?  @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  product  Product  @relation(fields: [productId], references: [id])
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@unique([productId, customerId]) // 1 khách chỉ review 1 sản phẩm đúng 1 lần
+  @@map("reviews")
+}
+
+// ------------------------------------------------------------
+// Admin
+// Seed sẵn 1 tài khoản (admin / Admin@123, bcryptjs cost 10)
+// vì không có tính năng đăng ký cho Admin.
+// ------------------------------------------------------------
 model Admin {
   id           Int    @id @default(autoincrement())
-  username     String @unique @db.VarChar(255)
+  username     String @unique @db.VarChar(100)
   passwordHash String @map("password_hash") @db.VarChar(255)
 
   @@map("admins")

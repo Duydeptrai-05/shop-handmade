@@ -3,7 +3,9 @@
  * Chạy bằng: npx prisma db seed
  *
  * - Chạy lại nhiều lần vẫn an toàn (không tạo trùng dữ liệu).
- * - Tạo: 3 danh mục, 15 sản phẩm, 1 tài khoản Admin, 4 đơn hàng mẫu.
+ * - Tạo: 3 danh mục, 15 sản phẩm, 1 tài khoản Admin,
+ *   4 tài khoản Customer mẫu, 4 đơn hàng mẫu (mỗi đơn gắn 1 Customer),
+ *   2 review mẫu (chỉ cho đơn đã completed).
  */
 import "dotenv/config";
 import bcrypt from "bcryptjs";
@@ -50,7 +52,7 @@ const PRODUCTS: SeedProduct[] = [
       "Nến đổ thủ công từ sáp đậu nành tự nhiên, hương oải hương dịu nhẹ giúp thư giãn và dễ ngủ. Bấc cotton cháy sạch, thời gian đốt khoảng 40 giờ.",
     price: 185000,
     stock: 25,
-    image: img("nen-ngoi-sao"),
+    image: img("nen-lavender"),
     category: "Nến thơm",
   },
   {
@@ -59,7 +61,7 @@ const PRODUCTS: SeedProduct[] = [
       "Hương thơm dễ chịu, hình dạng nến rất đẹp, rất xinh và dễ thương. Rất phù hợp để tặng bạn bè người thân vào các dịp lễ.",
     price: 195000,
     stock: 18,
-    image: img("nen-vanilla-caramel"),
+    image: img("nen-ngoi-sao"),
     category: "Nến thơm",
   },
   {
@@ -185,10 +187,39 @@ const PRODUCTS: SeedProduct[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// 2. Đơn hàng mẫu (để trang admin có dữ liệu demo, đủ 4 trạng thái)
+// 2. Tài khoản Customer mẫu
+// Mật khẩu chung cho tất cả: Customer@123 (chỉ để demo/test đăng nhập)
+// ---------------------------------------------------------------------------
+const SAMPLE_CUSTOMERS = [
+  {
+    name: "Nguyễn Thị Mai",
+    email: "mai@example.com",
+    phone: "0901234567",
+  },
+  {
+    name: "Trần Văn Hùng",
+    email: "hung@example.com",
+    phone: "0912345678",
+  },
+  {
+    name: "Lê Thu Hà",
+    email: "ha@example.com",
+    phone: "0987654321",
+  },
+  {
+    name: "Phạm Quốc Bảo",
+    email: "bao@example.com",
+    phone: "0933445566",
+  },
+];
+
+// ---------------------------------------------------------------------------
+// 3. Đơn hàng mẫu (để trang admin có dữ liệu demo, đủ 5 trạng thái)
+// customerEmail dùng để gắn đơn với đúng Customer đã seed ở trên
 // ---------------------------------------------------------------------------
 const SAMPLE_ORDERS = [
   {
+    customerEmail: "mai@example.com",
     customerName: "Nguyễn Thị Mai",
     phone: "0901234567",
     address: "12 Nguyễn Trãi, Phường Bến Thành, Quận 1, TP. Hồ Chí Minh",
@@ -199,6 +230,7 @@ const SAMPLE_ORDERS = [
     ],
   },
   {
+    customerEmail: "hung@example.com",
     customerName: "Trần Văn Hùng",
     phone: "0912345678",
     address: "45 Lê Lợi, Phường 1, TP. Phan Thiết, Bình Thuận",
@@ -206,6 +238,7 @@ const SAMPLE_ORDERS = [
     items: [{ name: "Nến thơm hương Gỗ đàn hương", quantity: 1 }],
   },
   {
+    customerEmail: "ha@example.com",
     customerName: "Lê Thu Hà",
     phone: "0987654321",
     address: "88 Trần Phú, Phường Lộc Thọ, TP. Nha Trang, Khánh Hòa",
@@ -216,6 +249,7 @@ const SAMPLE_ORDERS = [
     ],
   },
   {
+    customerEmail: "bao@example.com",
     customerName: "Phạm Quốc Bảo",
     phone: "0933445566",
     address: "7 Hai Bà Trưng, Phường Tràng Tiền, Quận Hoàn Kiếm, Hà Nội",
@@ -224,6 +258,34 @@ const SAMPLE_ORDERS = [
       { name: "Dây chuyền hoa thạch", quantity: 1 },
       { name: "Tranh thêu len handmade", quantity: 2 },
     ],
+  },
+  {
+    customerEmail: "hung@example.com",
+    customerName: "Trần Văn Hùng",
+    phone: "0912345678",
+    address: "45 Lê Lợi, Phường 1, TP. Phan Thiết, Bình Thuận",
+    status: OrderStatus.cancelled,
+    items: [{ name: "Vòng Tay Dây Sáp Sao Biển", quantity: 1 }],
+  },
+];
+
+// ---------------------------------------------------------------------------
+// 4. Review mẫu — chỉ tạo cho Customer đã có đơn `completed` chứa đúng
+// sản phẩm đó, đúng theo điều kiện nghiệp vụ đã chốt.
+// ---------------------------------------------------------------------------
+const SAMPLE_REVIEWS = [
+  {
+    customerEmail: "bao@example.com",
+    productName: "Dây chuyền hoa thạch",
+    rating: 5,
+    comment:
+      "Sản phẩm đẹp hơn cả trong ảnh, đóng gói cẩn thận, sẽ ủng hộ tiếp!",
+  },
+  {
+    customerEmail: "bao@example.com",
+    productName: "Tranh thêu len handmade",
+    rating: 4,
+    comment: "Chất lượng tốt, len mềm mịn, chỉ hơi lâu ship so với dự kiến.",
   },
 ];
 
@@ -260,6 +322,30 @@ async function seedCategories() {
   return map;
 }
 
+async function seedCustomers() {
+  const password = process.env.SEED_CUSTOMER_PASSWORD ?? "Customer@123";
+  const passwordHash = await bcrypt.hash(password, 10);
+
+  const map = new Map<string, number>(); // email -> id
+  for (const c of SAMPLE_CUSTOMERS) {
+    const customer = await prisma.customer.upsert({
+      where: { email: c.email },
+      update: { name: c.name, phone: c.phone },
+      create: {
+        name: c.name,
+        email: c.email,
+        phone: c.phone,
+        passwordHash,
+      },
+    });
+    map.set(c.email, customer.id);
+  }
+  console.log(
+    `✔ Customer: ${SAMPLE_CUSTOMERS.length}  (mật khẩu chung: ${password})`,
+  );
+  return map;
+}
+
 async function seedProducts(categoryIds: Map<string, number>) {
   for (const p of PRODUCTS) {
     const data = {
@@ -285,7 +371,7 @@ async function seedProducts(categoryIds: Map<string, number>) {
   console.log(`✔ Sản phẩm: ${PRODUCTS.length}`);
 }
 
-async function seedOrders() {
+async function seedOrders(customerIds: Map<string, number>) {
   // Chỉ tạo đơn mẫu khi bảng orders còn trống, tránh nhân đôi mỗi lần seed
   const count = await prisma.order.count();
   if (count > 0) {
@@ -297,8 +383,14 @@ async function seedOrders() {
   const byName = new Map(products.map((p) => [p.name, p]));
 
   for (const o of SAMPLE_ORDERS) {
+    const customerId = customerIds.get(o.customerEmail);
+    if (!customerId) {
+      throw new Error(`Không tìm thấy customer mẫu: ${o.customerEmail}`);
+    }
+
     await prisma.order.create({
       data: {
+        customerId,
         customerName: o.customerName,
         phone: o.phone,
         address: o.address,
@@ -322,12 +414,44 @@ async function seedOrders() {
   console.log(`✔ Đơn hàng mẫu: ${SAMPLE_ORDERS.length}`);
 }
 
+async function seedReviews(customerIds: Map<string, number>) {
+  const count = await prisma.review.count();
+  if (count > 0) {
+    console.log(`• Đã có ${count} review, bỏ qua review mẫu`);
+    return;
+  }
+
+  const products = await prisma.product.findMany();
+  const byName = new Map(products.map((p) => [p.name, p]));
+
+  for (const r of SAMPLE_REVIEWS) {
+    const customerId = customerIds.get(r.customerEmail);
+    const product = byName.get(r.productName);
+    if (!customerId || !product) {
+      throw new Error(
+        `Thiếu dữ liệu để tạo review mẫu: ${r.customerEmail} / ${r.productName}`,
+      );
+    }
+    await prisma.review.create({
+      data: {
+        productId: product.id,
+        customerId,
+        rating: r.rating,
+        comment: r.comment,
+      },
+    });
+  }
+  console.log(`✔ Review mẫu: ${SAMPLE_REVIEWS.length}`);
+}
+
 async function main() {
   console.log("Bắt đầu seed dữ liệu...");
   await seedAdmin();
+  const customerIds = await seedCustomers();
   const categoryIds = await seedCategories();
   await seedProducts(categoryIds);
-  await seedOrders();
+  await seedOrders(customerIds);
+  await seedReviews(customerIds);
   console.log("Seed hoàn tất.");
 }
 
