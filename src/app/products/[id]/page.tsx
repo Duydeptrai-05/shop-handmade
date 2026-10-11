@@ -1,7 +1,14 @@
 import { prisma } from "../../../../lib/prisma";
 import { formatVND } from "../../../../lib/format";
+import { getCurrentCustomer } from "../../../../lib/auth";
 import Image from "next/image";
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import AddToCartButton from "../../../components/AddToCartButton";
+import ReviewForm from "../../../components/ReviewForm";
+
+// Từ ngưỡng này trở xuống thì báo "Chỉ còn ..." để khách biết món sắp hết
+const LOW_STOCK = 5;
 
 export default async function ProductDetailPage({
   params,
@@ -10,18 +17,21 @@ export default async function ProductDetailPage({
 }) {
   const { id } = await params;
 
-  const product = await prisma.product.findFirst({
-    where: { id: Number(id), isActive: true },
-    include: {
-      category: true,
-      reviews: {
-        include: {
-          customer: { select: { name: true } },
+  const [product, customer] = await Promise.all([
+    prisma.product.findFirst({
+      where: { id: Number(id), isActive: true },
+      include: {
+        category: true,
+        reviews: {
+          include: {
+            customer: { select: { name: true } },
+          },
+          orderBy: { createdAt: "desc" },
         },
-        orderBy: { createdAt: "desc" },
       },
-    },
-  });
+    }),
+    getCurrentCustomer(),
+  ]);
 
   if (!product) notFound();
 
@@ -31,25 +41,68 @@ export default async function ProductDetailPage({
       ? 0
       : product.reviews.reduce((sum, r) => sum + r.rating, 0) / reviewCount;
 
+  const outOfStock = product.stock <= 0;
+  const lowStock = !outOfStock && product.stock <= LOW_STOCK;
+
   return (
-    <main className="mx-auto max-w-4xl px-4 py-10">
-      <div className="grid gap-8 md:grid-cols-2">
-        <div className="relative aspect-square overflow-hidden rounded-2xl bg-card">
-          <Image
-            src={product.imageUrl ?? "/images/products/placeholder.jpg"}
-            alt={product.name}
-            fill
-            className="object-cover"
-          />
+    <main className="mx-auto max-w-5xl px-4 pb-20 pt-8">
+      {/* Đường dẫn quay lại */}
+      <nav
+        aria-label="Đường dẫn"
+        className="flex flex-wrap items-center gap-2 text-sm text-ink/55"
+      >
+        <Link href="/" className="transition-colors hover:text-moss-dark">
+          Trang chủ
+        </Link>
+        <span aria-hidden>/</span>
+        <Link
+          href="/products"
+          className="transition-colors hover:text-moss-dark"
+        >
+          Sản phẩm
+        </Link>
+        <span aria-hidden>/</span>
+        <Link
+          href={`/products?category=${product.categoryId}`}
+          className="transition-colors hover:text-moss-dark"
+        >
+          {product.category.name}
+        </Link>
+      </nav>
+
+      <div className="mt-6 grid gap-10 md:grid-cols-2 md:gap-12">
+        {/* Ảnh: khung kiểu ảnh dán */}
+        <div className="h-fit rounded-lg border border-peach/50 bg-white p-3 shadow-warm-lg md:sticky md:top-24">
+          <div className="relative aspect-square overflow-hidden bg-blush/40">
+            <Image
+              src={product.imageUrl ?? "/images/products/placeholder.jpg"}
+              alt={product.name}
+              fill
+              sizes="(min-width: 768px) 50vw, 100vw"
+              priority
+              className={`object-cover ${
+                outOfStock ? "opacity-60 grayscale" : ""
+              }`}
+            />
+            {outOfStock && (
+              <span className="absolute left-0 top-4 bg-ink px-4 py-1.5 text-xs font-medium uppercase tracking-wider text-paper">
+                Hết hàng
+              </span>
+            )}
+          </div>
         </div>
 
+        {/* Thông tin */}
         <div>
-          <p className="text-sm uppercase tracking-wide text-moss">
+          <p className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.22em] text-moss-dark">
+            <span className="h-px w-8 bg-moss-dark" />
             {product.category.name}
           </p>
-          <h1 className="mt-1 text-2xl font-semibold">{product.name}</h1>
+          <h1 className="mt-3 text-3xl font-semibold leading-tight sm:text-4xl">
+            {product.name}
+          </h1>
 
-          <div className="mt-2 flex items-center gap-2">
+          <div className="mt-3 flex items-center gap-2">
             <StarRating value={averageRating} />
             <span className="text-sm text-ink/60">
               {reviewCount > 0
@@ -58,54 +111,104 @@ export default async function ProductDetailPage({
             </span>
           </div>
 
-          <p className="mt-3 font-heading text-2xl text-ochre">
+          <p className="mt-5 font-heading text-4xl font-semibold text-moss-dark">
             {formatVND(Number(product.price))}
           </p>
 
-          <p className="mt-2 text-sm">
-            {product.stock > 0 ? (
-              <span className="text-moss">Còn hàng ({product.stock})</span>
+          {/* Tình trạng kho */}
+          <p className="mt-4">
+            {outOfStock ? (
+              <span className="inline-block rounded-md bg-ink px-3 py-1 text-sm font-medium text-paper">
+                Hết hàng
+              </span>
+            ) : lowStock ? (
+              <span className="inline-block rounded-md bg-ochre px-3 py-1 text-sm font-semibold text-ink">
+                Chỉ còn {product.stock} món
+              </span>
             ) : (
-              <span className="text-ink/50">Hết hàng</span>
+              <span className="inline-block rounded-md border border-peach bg-blush/60 px-3 py-1 text-sm font-medium text-moss-dark">
+                Còn hàng ({product.stock})
+              </span>
             )}
           </p>
 
-          <p className="mt-6 whitespace-pre-line text-ink/80">
-            {product.description}
-          </p>
+          <div className="mt-6 border-t border-ink/15 pt-6">
+            <p className="whitespace-pre-line leading-relaxed text-ink/80">
+              {product.description}
+            </p>
+          </div>
 
-          {/* Nút "Thêm vào giỏ" sẽ nối vào Cart Context ở Tuần 2 */}
-          <button
-            disabled={product.stock === 0}
-            className="mt-8 w-full rounded-full bg-ink py-3 text-paper transition hover:bg-ink/90 disabled:cursor-not-allowed disabled:bg-ink/30"
-          >
-            {product.stock > 0 ? "Thêm vào giỏ hàng" : "Hết hàng"}
-          </button>
+          <AddToCartButton
+            productId={product.id}
+            name={product.name}
+            price={Number(product.price)}
+            imageUrl={product.imageUrl}
+            stock={product.stock}
+            isLoggedIn={customer !== null}
+          />
         </div>
       </div>
 
-      <section className="mt-12">
-        <h2 className="font-heading text-xl">Đánh giá sản phẩm</h2>
+      {/* Đánh giá */}
+      <section className="mt-20">
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-ink/15 pb-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-moss-dark">
+              Khách nói gì
+            </p>
+            <h2 className="mt-1 text-2xl font-semibold sm:text-3xl">
+              Đánh giá sản phẩm
+            </h2>
+          </div>
+          {reviewCount > 0 && (
+            <div className="flex items-center gap-3">
+              <span className="font-heading text-4xl font-semibold text-moss-dark">
+                {averageRating.toFixed(1)}
+              </span>
+              <div>
+                <StarRating value={averageRating} />
+                <p className="mt-0.5 text-xs text-ink/55">
+                  {reviewCount} đánh giá
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
 
         {product.reviews.length === 0 ? (
-          <p className="mt-3 text-ink/60">
+          <p className="mt-6 rounded-lg border-2 border-dashed border-peach bg-white px-6 py-8 text-center text-ink/60">
             Chưa có đánh giá nào cho sản phẩm này.
           </p>
         ) : (
-          <ul className="mt-4 space-y-4">
+          <ul className="mt-6 grid gap-4 sm:grid-cols-2">
             {product.reviews.map((review) => (
-              <li key={review.id} className="rounded-2xl bg-card p-4">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{review.customer.name}</span>
+              <li
+                key={review.id}
+                className="rounded-lg border border-peach/50 bg-white p-5 shadow-warm"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span
+                      aria-hidden
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blush font-heading text-base font-semibold text-moss-dark"
+                    >
+                      {review.customer.name.trim().charAt(0).toUpperCase()}
+                    </span>
+                    <span className="font-medium">{review.customer.name}</span>
+                  </div>
                   <StarRating value={review.rating} />
                 </div>
                 {review.comment && (
-                  <p className="mt-2 text-ink/80">{review.comment}</p>
+                  <p className="mt-3 leading-relaxed text-ink/80">
+                    {review.comment}
+                  </p>
                 )}
               </li>
             ))}
           </ul>
         )}
+
+        <ReviewForm productId={product.id} />
       </section>
     </main>
   );

@@ -72,6 +72,10 @@ enum OrderStatus {
   completed
   cancelled
 }
+enum PaymentMethod {
+  cod
+  bank_transfer
+}
 
 model Order {
   id           Int         @id @default(autoincrement())
@@ -87,6 +91,9 @@ model Order {
 
   @@index([customerId])
   @@map("orders")
+  paymentMethod PaymentMethod @default(cod) @map("payment_method")
+  isPaid        Boolean       @default(false) @map("is_paid")
+  paidAt        DateTime?     @map("paid_at")
 }
 
 // ------------------------------------------------------------

@@ -1,18 +1,77 @@
 @import "tailwindcss";
 
 @theme {
-  --color-paper: #f7f3ed;
-  --color-ink: #2b2620;
-  --color-ochre: #c79a3d;
-  --color-moss: #6b7a5e;
-  --color-card: #efe9de;
+  /* Bảng màu hồng san hô - mận */
+  --color-paper: #fff7f3; /* nền trắng hồng rất nhạt */
+  --color-card: #ffffff; /* thẻ, khung: trắng sạch cho nổi trên nền */
+  --color-ink: #33202a; /* chữ mận đậm */
+  --color-moss: #f4604f; /* nhấn chính: san hô (giữ tên cũ để không phải sửa file khác) */
+  --color-moss-dark: #d9432f; /* san hô đậm, dùng cho hover và chữ nhỏ */
+  --color-peach: #f9a8a0; /* hồng đào, dùng cho viền, huy hiệu, họa tiết */
+  --color-blush: #fde3dd; /* nền nhấn nhạt */
+  --color-ochre: #f2b84b; /* vàng ấm, giữ cho sao đánh giá và cảnh báo */
 
   --font-heading: var(--font-heading);
   --font-body: var(--font-body);
+
+  /* Bóng đổ ngả mận (dùng bằng class shadow-warm, shadow-warm-lg) */
+  --shadow-warm: 0 6px 20px -6px rgb(51 32 42 / 0.16);
+  --shadow-warm-lg: 0 18px 40px -12px rgb(51 32 42 / 0.26);
+
+  /* Hiệu ứng: dùng bằng class animate-fade-up, animate-fade-in, animate-float, animate-marquee */
+  --animate-fade-up: fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-fade-in: fade-in 0.8s ease-out both;
+  --animate-float: float 9s ease-in-out infinite;
+  --animate-marquee: marquee 28s linear infinite;
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(24px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes float {
+    0%,
+    100% {
+      transform: translate(0, 0) scale(1);
+    }
+    50% {
+      transform: translate(18px, -26px) scale(1.06);
+    }
+  }
+
+  @keyframes marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
   font-family: var(--font-body);
+  background-color: var(--color-paper);
+  color: var(--color-ink);
 }
 
 h1,
@@ -20,4 +79,26 @@ h2,
 h3,
 h4 {
   font-family: var(--font-heading);
+}
+
+/* Bôi đen chữ cũng ra màu ấm */
+::selection {
+  background-color: var(--color-peach);
+  color: var(--color-ink);
+}
+/* Người dùng tắt chuyển động trong hệ điều hành thì giảm hiệu ứng */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Dải chữ chạy ngang luôn chạy, kể cả khi máy tắt hiệu ứng động */
+.marquee-track {
+  animation-duration: 28s !important;
+  animation-iteration-count: infinite !important;
 }
