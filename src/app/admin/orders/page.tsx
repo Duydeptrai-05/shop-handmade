@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
@@ -62,6 +62,9 @@ const stampStyles: Record<string, string> = {
 // Các chặng của đường chỉ khâu
 const STEPS = ["pending", "confirmed", "shipped", "completed"];
 const STEP_LABELS = ["Chờ", "Xác nhận", "Giao hàng", "Hoàn tất"];
+
+// Tự làm mới danh sách đơn sau mỗi khoảng này (mili giây)
+const AUTO_REFRESH_MS = 30_000;
 
 // Nút hiển thị theo trạng thái hiện tại. Phải khớp ALLOWED_TRANSITIONS ở API
 // (API vẫn là nơi chốt luật, đây chỉ để giao diện không hiện nút vô ích).
@@ -149,16 +152,26 @@ export default function AdminOrdersPage() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [reloadKey, setReloadKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false); // đang tải ngầm
+  const loadedRef = useRef(false); // đã có dữ liệu ít nhất một lần
 
-  // Tải toàn bộ đơn một lần; lọc theo trạng thái và tìm kiếm làm ở phía client
-  // để các nhãn có số đếm chính xác và đổi bộ lọc không phải chờ
+  // Tải toàn bộ đơn; lọc theo trạng thái và tìm kiếm làm ở phía client
+  // để các nhãn có số đếm chính xác và đổi bộ lọc không phải chờ.
+  // Lần đầu hiện khung chờ, các lần sau tải ngầm (giữ nguyên danh sách đang xem).
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
-      setOrders(null);
-      setError(null);
-      setActionError(null);
+      const silent = loadedRef.current;
+
+      if (silent) {
+        setRefreshing(true);
+      } else {
+        setOrders(null);
+        setError(null);
+        setActionError(null);
+      }
+
       try {
         const res = await fetch("/api/admin/orders");
         const json = await res.json();
@@ -166,13 +179,21 @@ export default function AdminOrdersPage() {
 
         if (res.ok && json.success) {
           setOrders(json.data);
+          setError(null);
+          loadedRef.current = true;
           return;
         }
         if (res.status === 401) setNeedLogin(true);
-        setError(json.message ?? "Có lỗi xảy ra, vui lòng thử lại");
+        // Tải ngầm lỗi thì giữ danh sách cũ, chỉ báo khi hết phiên đăng nhập
+        if (!silent || res.status === 401) {
+          setError(json.message ?? "Có lỗi xảy ra, vui lòng thử lại");
+        }
       } catch {
-        if (!cancelled)
+        if (!cancelled && !silent) {
           setError("Không kết nối được máy chủ, vui lòng thử lại");
+        }
+      } finally {
+        if (!cancelled) setRefreshing(false);
       }
     }
 
@@ -181,6 +202,16 @@ export default function AdminOrdersPage() {
       cancelled = true;
     };
   }, [reloadKey]);
+
+  // Tự làm mới định kỳ, chỉ khi tab đang được xem
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        setReloadKey((k) => k + 1);
+      }
+    }, AUTO_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, []);
 
   // Thay một đơn trong danh sách bằng bản mới từ server
   function replaceOrder(updated: Order) {
@@ -337,10 +368,11 @@ export default function AdminOrdersPage() {
           <button
             type="button"
             onClick={() => setReloadKey((k) => k + 1)}
-            className="rounded-full border border-ink/20 px-4 py-2 text-sm transition hover:bg-ink hover:text-paper"
+            disabled={refreshing}
+            className="rounded-full border border-ink/20 px-4 py-2 text-sm transition hover:bg-ink hover:text-paper disabled:opacity-60 disabled:hover:bg-transparent disabled:hover:text-ink"
             aria-label="Tải lại danh sách đơn"
           >
-            ↻ Tải lại
+            {refreshing ? "Đang tải..." : "↻ Tải lại"}
           </button>
         </div>
       </motion.div>

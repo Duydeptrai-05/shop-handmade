@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../../../../lib/prisma";
 import { getAuthPayload } from "../../../../../../../lib/auth";
+import { cancelExpiredBankOrders } from "../../../../../../../lib/expire-orders"; // MỚI
 
 class PaymentError extends Error {
   status: number;
@@ -35,6 +36,12 @@ export async function PATCH(
       );
     }
 
+    // MỚI: hủy các đơn chuyển khoản quá hạn trước, để một đơn đã quá hạn
+    // rơi vào nhánh "đã bị hủy" bên dưới thay vì được xác nhận nhầm
+    await cancelExpiredBankOrders().catch((e) =>
+      console.error("cancelExpiredBankOrders (PATCH payment):", e),
+    );
+
     // 3. Kiểm tra điều kiện và ghi nhận trong cùng một transaction
     const updated = await prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { id: orderId } });
@@ -46,7 +53,7 @@ export async function PATCH(
       }
       if (order.status === "cancelled") {
         throw new PaymentError(
-          "Đơn hàng đã bị hủy, không thể xác nhận thanh toán",
+          "Đơn hàng đã bị hủy (hoặc quá hạn chuyển khoản), không thể xác nhận thanh toán",
         );
       }
       if (order.isPaid) {

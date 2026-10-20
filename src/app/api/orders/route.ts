@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../lib/prisma";
 import { getAuthPayload } from "../../../../lib/auth";
 import { createOrderSchema } from "../../../../lib/validation/order";
+import { cancelExpiredBankOrders } from "../../../../lib/expire-orders"; // MỚI
 
 // Lỗi nghiệp vụ có status HTTP riêng (khác lỗi hệ thống 500)
 class OrderError extends Error {
@@ -22,6 +23,12 @@ export async function POST(request: NextRequest) {
         { status: 401 },
       );
     }
+
+    // MỚI: hủy các đơn chuyển khoản quá hạn trước để hoàn kho,
+    // rồi mới kiểm tra tồn kho cho đơn này. Lỗi ở bước này không được chặn việc đặt hàng.
+    await cancelExpiredBankOrders().catch((e) =>
+      console.error("cancelExpiredBankOrders (POST /api/orders):", e),
+    );
 
     // 2. Validate body
     const body = await request.json();
@@ -113,6 +120,7 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
 // Lịch sử đơn hàng của CHÍNH khách đang đăng nhập
 export async function GET() {
   try {
@@ -125,6 +133,12 @@ export async function GET() {
         { status: 401 },
       );
     }
+
+    // MỚI: hủy đơn chuyển khoản quá hạn trước khi trả danh sách,
+    // để khách thấy đúng trạng thái "Đã hủy"
+    await cancelExpiredBankOrders().catch((e) =>
+      console.error("cancelExpiredBankOrders (GET /api/orders):", e),
+    );
 
     const orders = await prisma.order.findMany({
       where: { customerId: payload.id },

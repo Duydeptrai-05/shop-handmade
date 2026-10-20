@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "../../../../../lib/prisma";
 import { getAuthPayload } from "../../../../../lib/auth";
+import { cancelExpiredBankOrders } from "../../../../../lib/expire-orders"; // MỚI
 
 // Lọc theo trạng thái là tùy chọn: /api/admin/orders?status=pending
 const querySchema = z.object({
@@ -30,6 +31,12 @@ export async function GET(request: NextRequest) {
         { status: 400 },
       );
     }
+
+    // MỚI: hủy đơn chuyển khoản quá hạn trước khi trả danh sách,
+    // để Admin thấy đúng trạng thái và kho đã được hoàn
+    await cancelExpiredBankOrders().catch((e) =>
+      console.error("cancelExpiredBankOrders (GET /api/admin/orders):", e),
+    );
 
     const orders = await prisma.order.findMany({
       where: parsed.data.status ? { status: parsed.data.status } : undefined,
