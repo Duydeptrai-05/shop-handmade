@@ -6,6 +6,7 @@ import LogoutButton from "./LogoutButton";
 import GuestNav from "./GuestNav";
 import CategoryMenu from "./CategoryMenu";
 import NavShell from "./NavShell";
+import OrdersLink from "./OrdersLink";
 
 // Link dạng viên thuốc: hover nền hồng nhạt, chữ san hô đậm
 const linkClass =
@@ -68,9 +69,7 @@ export default async function Header() {
               </Link>
               <CategoryMenu categories={categories} />
               <CartLink className={linkClass} />
-              <Link href="/orders" className={linkClass}>
-                Đơn hàng của tôi
-              </Link>
+              <OrdersLink className={linkClass} />
               <LogoutButton redirectTo="/" className={linkClass} />
             </>
           ) : (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { formatVND } from "../../../lib/format";
@@ -130,8 +130,315 @@ function PayRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+type ChangeKind = "cancel" | "update_address";
+
+// Khu vực khách tự hủy đơn / đổi thông tin nhận hàng
+function OrderActions({
+  order,
+  onChanged,
+}: {
+  order: Order;
+  onChanged: (kind: ChangeKind) => void;
+}) {
+  const [mode, setMode] = useState<"idle" | "confirmCancel" | "editAddress">(
+    "idle",
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    customerName: order.customerName,
+    phone: order.phone,
+    address: order.address,
+  });
+
+  // Đơn đã hủy / hoàn thành: không cần khu vực này
+  if (order.status === "cancelled" || order.status === "completed") {
+    return null;
+  }
+
+  // Chỉ tự sửa/hủy khi đơn còn chờ xác nhận và chưa trả tiền
+  const canSelfService = order.status === "pending" && !order.isPaid;
+
+  if (!canSelfService) {
+    let message =
+      "Đơn đã được shop xử lý nên không thể tự hủy hay đổi địa chỉ. Cần hỗ trợ thì bạn liên hệ shop nhé.";
+    if (order.status === "pending" && order.isPaid) {
+      message =
+        "Đơn này đã thanh toán nên bạn không tự hủy hoặc đổi địa chỉ được. Vui lòng liên hệ shop để được hỗ trợ.";
+    }
+    return (
+      <p className="mt-6 rounded-xl bg-paper px-4 py-3 text-sm text-ink/65">
+        {message}
+      </p>
+    );
+  }
+
+  async function send(body: Record<string, unknown>) {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success) {
+        return true;
+      }
+      setError(json?.message ?? "Có lỗi xảy ra, vui lòng thử lại");
+      return false;
+    } catch {
+      setError("Không kết nối được máy chủ, vui lòng thử lại");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCancel() {
+    const ok = await send({ action: "cancel" });
+    if (ok) {
+      onChanged("cancel");
+    }
+  }
+
+  async function handleSaveAddress(e: React.FormEvent) {
+    e.preventDefault();
+    const name = form.customerName.trim();
+    const phone = form.phone.trim();
+    const address = form.address.trim();
+    if (!name || !phone || !address) {
+      setError("Vui lòng điền đầy đủ họ tên, số điện thoại và địa chỉ");
+      return;
+    }
+    const ok = await send({
+      action: "update_address",
+      customerName: name,
+      phone,
+      address,
+    });
+    if (ok) {
+      setMode("idle");
+      setNotice("Đã cập nhật thông tin nhận hàng.");
+      onChanged("update_address");
+    }
+  }
+
+  const inputClass =
+    "w-full border-0 border-b border-ink/25 bg-transparent px-0 py-2 text-sm outline-none transition-colors focus:border-moss-dark";
+
+  return (
+    <div className="mt-6 border-t border-ink/10 pt-6">
+      {notice && mode === "idle" && (
+        <p className="mb-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {notice}
+        </p>
+      )}
+
+      {mode === "idle" && (
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setForm({
+                customerName: order.customerName,
+                phone: order.phone,
+                address: order.address,
+              });
+              setNotice(null);
+              setError(null);
+              setMode("editAddress");
+            }}
+            className="rounded-full border border-ink/25 px-5 py-2 text-sm font-semibold transition hover:border-ink hover:bg-paper"
+          >
+            Đổi thông tin nhận hàng
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setNotice(null);
+              setError(null);
+              setMode("confirmCancel");
+            }}
+            className="rounded-full px-5 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50"
+          >
+            Hủy đơn
+          </button>
+          <p className="w-full text-xs text-ink/50 sm:w-auto">
+            Chỉ làm được khi shop chưa xác nhận đơn.
+          </p>
+        </div>
+      )}
+
+      {mode === "confirmCancel" && (
+        <div className="rounded-xl bg-red-50 p-4">
+          <p className="text-sm font-semibold text-red-800">
+            Bạn chắc chắn muốn hủy đơn #{order.id}?
+          </p>
+          <p className="mt-1 text-sm text-red-800/80">
+            Đơn đã hủy không thể khôi phục. Các sản phẩm sẽ được trả lại kho,
+            nếu vẫn muốn mua bạn cần đặt đơn mới.
+          </p>
+          {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={handleCancel}
+              className="rounded-full bg-red-700 px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-800 disabled:opacity-60"
+            >
+              {busy ? "Đang hủy..." : "Xác nhận hủy"}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setMode("idle");
+                setError(null);
+              }}
+              className="rounded-full border border-ink/25 bg-white px-5 py-2 text-sm font-semibold transition hover:bg-paper disabled:opacity-60"
+            >
+              Giữ đơn
+            </button>
+          </div>
+        </div>
+      )}
+
+      {mode === "editAddress" && (
+        <form onSubmit={handleSaveAddress} className="rounded-xl bg-paper p-4">
+          <p className="text-xs font-semibold uppercase tracking-wider text-ink/45">
+            Đổi thông tin nhận hàng
+          </p>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <label className="block text-xs text-ink/55">
+              Họ tên người nhận
+              <input
+                value={form.customerName}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, customerName: e.target.value }))
+                }
+                className={inputClass}
+                autoComplete="name"
+              />
+            </label>
+            <label className="block text-xs text-ink/55">
+              Số điện thoại
+              <input
+                value={form.phone}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, phone: e.target.value }))
+                }
+                className={inputClass}
+                inputMode="tel"
+                autoComplete="tel"
+              />
+            </label>
+          </div>
+          <label className="mt-4 block text-xs text-ink/55">
+            Địa chỉ giao hàng
+            <textarea
+              value={form.address}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, address: e.target.value }))
+              }
+              rows={2}
+              className={`${inputClass} resize-none`}
+              autoComplete="street-address"
+            />
+          </label>
+          {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-full bg-moss px-5 py-2 text-sm font-semibold text-white transition hover:bg-moss-dark disabled:opacity-60"
+            >
+              {busy ? "Đang lưu..." : "Lưu thay đổi"}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setMode("idle");
+                setError(null);
+              }}
+              className="rounded-full border border-ink/25 bg-white px-5 py-2 text-sm font-semibold transition hover:bg-paper disabled:opacity-60"
+            >
+              Bỏ qua
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+// Khung báo đơn đang trên đường giao
+function ShippingNotice({ order, total }: { order: Order; total: number }) {
+  const mustPay = order.paymentMethod === "cod" && !order.isPaid;
+
+  return (
+    <div className="mt-8 overflow-hidden rounded-2xl border-2 border-dashed border-ochre bg-ochre/15">
+      <div className="flex items-start gap-4 p-5">
+        <span
+          aria-hidden
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-ochre text-ink"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className="h-6 w-6"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3 7h11v9H3z" />
+            <path d="M14 10h4l3 3v3h-7z" />
+            <circle cx="7" cy="18" r="1.8" />
+            <circle cx="17" cy="18" r="1.8" />
+          </svg>
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-heading text-xl font-semibold leading-snug">
+            Đơn của bạn đang trên đường giao
+          </p>
+          <p className="mt-1 text-sm text-ink/70">
+            Bạn để ý điện thoại{" "}
+            <span className="font-semibold text-ink">{order.phone}</span> giúp
+            shop nhé, người giao hàng sẽ gọi trước khi đến.
+          </p>
+        </div>
+      </div>
+
+      <div className="border-t border-dashed border-ochre bg-white/60 px-5 py-4">
+        {mustPay ? (
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <p className="text-sm font-semibold">Bạn cần chuẩn bị tiền mặt</p>
+            <p className="font-heading text-3xl font-semibold leading-none text-moss-dark">
+              {formatVND(total)}
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm font-semibold text-emerald-800">
+            Đơn đã thanh toán, bạn không cần chuẩn bị thêm tiền.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Chi tiết một đơn: dùng cho khung bên phải (máy tính) và phần mở rộng (điện thoại)
-function OrderDetail({ order }: { order: Order }) {
+function OrderDetail({
+  order,
+  onChanged,
+}: {
+  order: Order;
+  onChanged: (kind: ChangeKind) => void;
+}) {
   const stepIndex = FLOW.indexOf(order.status);
   const cancelled = order.status === "cancelled";
   const total = orderTotal(order);
@@ -190,6 +497,10 @@ function OrderDetail({ order }: { order: Order }) {
         <p className="mt-6 rounded-xl bg-paper px-4 py-3 text-sm text-ink/70">
           Đơn hàng này đã bị hủy.
         </p>
+      )}
+
+      {order.status === "shipped" && (
+        <ShippingNotice order={order} total={total} />
       )}
 
       {/* Thanh toán */}
@@ -293,6 +604,9 @@ function OrderDetail({ order }: { order: Order }) {
           </p>
         </div>
       </div>
+
+      {/* Khách tự hủy đơn / đổi địa chỉ */}
+      <OrderActions order={order} onChanged={onChanged} />
     </div>
   );
 }
@@ -334,6 +648,27 @@ export default function OrdersPage() {
     }
     load();
   }, []);
+
+  // Tải lại danh sách ngầm sau khi khách hủy / đổi địa chỉ (không hiện khung xương)
+  const reloadOrders = useCallback(async () => {
+    try {
+      const res = await fetch("/api/orders");
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setOrders(json.data);
+      }
+    } catch {
+      // bỏ qua, giữ dữ liệu cũ
+    }
+  }, []);
+
+  function handleChanged(kind: ChangeKind) {
+    // Đơn vừa hủy không còn ở tab "Chờ xác nhận" nên quay về "Tất cả"
+    if (kind === "cancel") {
+      setFilter("all");
+    }
+    reloadOrders();
+  }
 
   if (needLogin) {
     return (
@@ -466,7 +801,7 @@ export default function OrdersPage() {
 
       <div className="mt-8 grid items-start gap-8 lg:grid-cols-[340px_1fr]">
         {/* Danh sách đơn */}
-        <ul className="space-y-3">
+        <ul className="space-y-3 lg:sticky lg:top-24 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto lg:p-1 lg:pr-2 lg:[scrollbar-width:thin]">
           {filtered.map((order) => {
             const isActive = isLg
               ? activeOrder?.id === order.id
@@ -538,7 +873,11 @@ export default function OrdersPage() {
                 {/* Điện thoại: chi tiết mở rộng ngay dưới đơn đang chọn */}
                 {!isLg && selectedId === order.id && (
                   <div className="mt-2 rounded-2xl bg-white p-5">
-                    <OrderDetail order={order} />
+                    <OrderDetail
+                      key={order.id}
+                      order={order}
+                      onChanged={handleChanged}
+                    />
                   </div>
                 )}
               </li>
@@ -554,8 +893,12 @@ export default function OrdersPage() {
 
         {/* Máy tính: khung chi tiết bên phải, dính theo màn hình */}
         {isLg && activeOrder && (
-          <section className="sticky top-24 rounded-2xl bg-white p-8">
-            <OrderDetail order={activeOrder} />
+          <section className="sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto rounded-2xl bg-white p-8 [scrollbar-width:thin]">
+            <OrderDetail
+              key={activeOrder.id}
+              order={activeOrder}
+              onChanged={handleChanged}
+            />
           </section>
         )}
       </div>

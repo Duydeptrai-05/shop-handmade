@@ -24,3 +24,24 @@ export const createOrderSchema = z.object({
 });
 
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
+
+// Khách sửa đơn: hủy đơn hoặc đổi thông tin nhận hàng
+export const updateOrderSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("cancel") }),
+  z.object({
+    action: z.literal("update_address"),
+    customerName: z
+      .string()
+      .trim()
+      .min(1, "Vui lòng nhập tên người nhận")
+      .max(255),
+    phone: z.string().trim().min(9, "Số điện thoại không hợp lệ").max(20),
+    address: z
+      .string()
+      .trim()
+      .min(1, "Vui lòng nhập địa chỉ giao hàng")
+      .max(500),
+  }),
+]);
+
+export type UpdateOrderInput = z.infer<typeof updateOrderSchema>;
