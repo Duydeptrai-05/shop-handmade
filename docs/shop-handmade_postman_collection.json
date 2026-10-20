@@ -1,0 +1,716 @@
+{
+  "info": {
+    "name": "Cỏ May Handmade - API",
+    "description": "Tài liệu API cho web bán đồ handmade (Next.js App Router + Prisma + MariaDB).\n\n## Cách dùng\n1. Chạy project: `npm run dev` (mặc định `http://localhost:3000`, đổi ở biến `baseUrl` nếu cổng khác).\n2. Xác thực bằng cookie httpOnly `session`. Postman tự lưu và gửi kèm cookie, không cần chép token.\n3. **Admin và Customer dùng chung cookie `session`**: đăng nhập vai trò nào thì gọi các request của vai trò đó ngay sau, đổi vai trò thì đăng nhập lại.\n\n## Thứ tự chạy gợi ý (luồng demo)\n1. `1. Auth - Customer` → Đăng nhập (`bao@example.com`)\n2. `2. Đơn hàng - Customer` → Tạo đơn (COD hoặc chuyển khoản), Lịch sử đơn; thử **Khách đổi thông tin nhận hàng** và **Khách hủy đơn** khi đơn còn `pending`\n3. `4. Admin` → Đăng nhập Admin → `5`:\n   - Đơn COD: đổi trạng thái tới `completed`\n   - Đơn chuyển khoản: **Xác nhận đã nhận tiền** trước, rồi mới đổi trạng thái được\n4. `1` → Đăng nhập Customer lại → `3. Đánh giá` → Viết đánh giá\n5. `4. Admin` → Đăng nhập Admin → `6. Quản lý sản phẩm`\n\n## Thanh toán\nCó 2 phương thức: `cod` (mặc định) và `bank_transfer`. Chuyển khoản là mô hình đối soát thủ công: khách chuyển tiền, Admin kiểm tra tiền đã về rồi gọi API xác nhận. Đơn chuyển khoản chưa nhận tiền chỉ được hủy, chưa chuyển sang `confirmed` trở đi được.\n\n## Khách tự hủy đơn / đổi địa chỉ\n`PATCH /api/orders/{{orderId}}` với `action` = `cancel` hoặc `update_address`. Chỉ làm được khi đơn còn `pending`; đơn chuyển khoản đã thanh toán thì không tự hủy được. Đơn chuyển khoản quá 15 phút chưa thanh toán sẽ tự hủy.\n\n## Đơn đang giao\n`GET /api/orders/shipping-count` trả số đơn `shipped` của khách (0 nếu chưa đăng nhập).\n\n## Biến collection\n`baseUrl`, `productId`, `orderId`, `adminProductId`: sửa ở tab Variables cho phù hợp dữ liệu thật.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Auth - Customer",
+      "description": "Đăng ký, đăng nhập, đăng xuất khách hàng. Đăng nhập thành công server set cookie httpOnly `session` (Postman tự lưu và tự gửi kèm các request sau, không cần copy token).",
+      "item": [
+        {
+          "name": "Đăng ký",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Tạo tài khoản Customer.\n\n**Body**: `name` (tối thiểu 2 ký tự), `email` (hợp lệ, duy nhất), `password` (tối thiểu 6 ký tự).\n\n**Lỗi thường gặp**: 400 dữ liệu sai; email đã tồn tại.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nguyễn Văn Test\",\n  \"email\": \"{{$randomEmail}}\",\n  \"password\": \"Customer@123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Đăng nhập Customer, set cookie `session` (role = customer).\n\nTài khoản mẫu từ seed: `bao@example.com` / `Customer@123`.\n\n**Body**: `email`, `password`.\n\n**Lỗi thường gặp**: 400 dữ liệu sai; 401 sai email hoặc mật khẩu.\n\n**Lưu ý**: Admin và Customer dùng chung cookie `session`, đăng nhập vai trò này sẽ thay phiên vai trò kia.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"bao@example.com\",\n  \"password\": \"Customer@123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Thông tin tài khoản hiện tại",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Trả về thông tin khách đang đăng nhập (không có `passwordHash`). Chưa đăng nhập thì trả lỗi 401.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`."
+          }
+        },
+        {
+          "name": "Đăng xuất",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Xóa cookie `session`. Dùng chung cho cả Customer và Admin.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Đơn hàng - Customer",
+      "description": "Yêu cầu đã đăng nhập Customer (chạy `Đăng nhập` ở thư mục 1 trước). `customerId` lấy từ token, không gửi trong body. Đơn chuyển khoản không thanh toán trong 15 phút thì tự hủy và hoàn kho (hệ thống kiểm tra khi có người gọi API đơn hàng).",
+      "item": [
+        {
+          "name": "Tạo đơn hàng - COD (mặc định)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders"
+              ]
+            },
+            "description": "Đặt hàng thanh toán khi nhận (COD). Không gửi `paymentMethod` thì server mặc định là `cod`. Server tính lại giá từ DB, client chỉ gửi `productId` và `quantity`. Trừ kho và tạo đơn nằm trong cùng một transaction.\n\n**Body**:\n- `customerName` (bắt buộc, tối đa 255)\n- `phone` (9 đến 20 ký tự)\n- `address` (bắt buộc, tối đa 500)\n- `paymentMethod` (tùy chọn): `cod` | `bank_transfer`, mặc định `cod`\n- `items[]`: `productId` (số nguyên dương), `quantity` (số nguyên dương), ít nhất 1 phần tử\n\n`isPaid` không nhận từ client: đơn mới luôn `isPaid = false`, chỉ Admin xác nhận được.\n\n**Lỗi thường gặp**: 401 chưa đăng nhập; 400 dữ liệu sai hoặc vượt tồn kho (thông báo dạng \"chỉ còn N trong kho\").\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Phạm Quốc Bảo\",\n  \"phone\": \"0933445566\",\n  \"address\": \"7 Hai Bà Trưng, Hoàn Kiếm, Hà Nội\",\n  \"items\": [\n    {\n      \"productId\": 1,\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Tạo đơn hàng - Chuyển khoản",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders"
+              ]
+            },
+            "description": "Đặt hàng với `paymentMethod = bank_transfer`. Đơn được tạo với `isPaid = false`, trạng thái `pending`. Khách chuyển khoản theo nội dung `COMAY <mã đơn>`, sau đó Admin xác nhận đã nhận tiền (thư mục `5`).\n\nCác trường khác giống request COD. Kết quả mong đợi: 201, `data.paymentMethod = \"bank_transfer\"`, `data.isPaid = false`, `data.paidAt = null`.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Phạm Quốc Bảo\",\n  \"phone\": \"0933445566\",\n  \"address\": \"7 Hai Bà Trưng, Hoàn Kiếm, Hà Nội\",\n  \"paymentMethod\": \"bank_transfer\",\n  \"items\": [\n    {\n      \"productId\": 1,\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Tạo đơn hàng - paymentMethod sai (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders"
+              ]
+            },
+            "description": "Gửi `paymentMethod` không nằm trong `cod` | `bank_transfer` (ví dụ `momo`). Kết quả mong đợi: 400, `message = \"Dữ liệu đơn hàng không hợp lệ\"`, `errors.paymentMethod` báo \"Phương thức thanh toán không hợp lệ\".\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Phạm Quốc Bảo\",\n  \"phone\": \"0933445566\",\n  \"address\": \"7 Hai Bà Trưng, Hoàn Kiếm, Hà Nội\",\n  \"paymentMethod\": \"momo\",\n  \"items\": [\n    {\n      \"productId\": 1,\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Lịch sử đơn hàng của tôi",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders"
+              ]
+            },
+            "description": "Danh sách đơn của chính khách đang đăng nhập (mới nhất trước), kèm `paymentMethod`, `isPaid`, `paidAt`. Chưa đăng nhập thì trả lỗi 401.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`."
+          }
+        },
+        {
+          "name": "Khách đổi thông tin nhận hàng",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": "Khách đổi tên người nhận, số điện thoại, địa chỉ của chính đơn mình khi đơn còn `pending`.\n\n**Luật**: khách chỉ tự sửa/hủy khi đơn còn `pending`. Đơn Admin đã xử lý (`confirmed` trở đi) hoặc đã hủy thì trả 400. Đơn chuyển khoản đã được xác nhận nhận tiền (`isPaid = true`) không tự hủy được, khách phải liên hệ shop. `customerId` lấy từ token; đơn của người khác trả 404.\n\n**Body**:\n- `action`: `update_address`\n- `customerName` (bắt buộc, tối đa 255)\n- `phone` (9 đến 20 ký tự)\n- `address` (bắt buộc, tối đa 500)\n\n**Mã phản hồi**:\n- 200 thành công\n- 400 dữ liệu sai, hoặc đơn không còn ở `pending` (đã xác nhận, đã hủy)\n- 401 chưa đăng nhập\n- 404 không tìm thấy đơn (hoặc đơn của người khác)\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"update_address\",\n  \"customerName\": \"Phạm Quốc Bảo\",\n  \"phone\": \"0933445566\",\n  \"address\": \"12 Nguyễn Huệ, Quận 1, TP. Hồ Chí Minh\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Khách hủy đơn",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": "Khách tự hủy đơn của mình khi đặt nhầm. Hủy thành công thì hoàn lại kho trong cùng một transaction.\n\n**Luật**: khách chỉ tự sửa/hủy khi đơn còn `pending`. Đơn Admin đã xử lý (`confirmed` trở đi) hoặc đã hủy thì trả 400. Đơn chuyển khoản đã được xác nhận nhận tiền (`isPaid = true`) không tự hủy được, khách phải liên hệ shop. `customerId` lấy từ token; đơn của người khác trả 404.\n\n**Body**: `action` = `cancel`.\n\n**Mã phản hồi**:\n- 200 hủy thành công, kho được hoàn lại\n- 400 đơn không còn ở `pending`, đơn chuyển khoản đã thanh toán, hoặc đơn đã hủy trước đó (thông báo \"Đơn này đã được hủy trước đó\")\n- 401 chưa đăng nhập\n- 404 không tìm thấy đơn (hoặc đơn của người khác)\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"cancel\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Khách sửa đơn - action sai (400)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": "Gửi `action` không nằm trong `cancel` | `update_address` (ví dụ `delete`). Kết quả mong đợi: 400 vì dữ liệu không hợp lệ, không có thay đổi nào ở đơn.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"delete\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Đếm đơn đang giao của tôi",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/shipping-count",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "shipping-count"
+              ]
+            },
+            "description": "Trả số đơn đang giao (`shipped`) của khách đang đăng nhập, dùng cho chấm số ở link \"Đơn hàng của tôi\" trên Header.\n\nKết quả mong đợi: 200, `data.count` là số nguyên từ 0 trở lên. Chưa đăng nhập thì vẫn trả 200 với `data.count = 0` (không báo 401, vì Header gọi API này ở mọi trang).\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Đánh giá sản phẩm",
+      "description": "Biến `productId` khai báo ở tab Variables của collection. Luật: chỉ được đánh giá khi khách có đơn `completed` chứa đúng sản phẩm, và mỗi khách chỉ đánh giá một sản phẩm đúng một lần.",
+      "item": [
+        {
+          "name": "Tình trạng đánh giá của tôi",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{productId}}/reviews",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{productId}}",
+                "reviews"
+              ]
+            },
+            "description": "Trả về `data: { loggedIn, canReview, hasReviewed }`. Chưa đăng nhập vẫn trả 200 với `loggedIn: false`.\n\n**Lỗi**: 400 mã sản phẩm không hợp lệ.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`."
+          }
+        },
+        {
+          "name": "Viết đánh giá",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{productId}}/reviews",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "{{productId}}",
+                "reviews"
+              ]
+            },
+            "description": "**Body**: `rating` (số nguyên 1 đến 5), `comment` (tùy chọn, tối đa 1000 ký tự).\n\n**Mã phản hồi**:\n- 201 thành công\n- 400 dữ liệu sai (ví dụ `rating` = 6) hoặc mã sản phẩm không hợp lệ\n- 401 chưa đăng nhập Customer\n- 403 chưa mua sản phẩm hoặc đơn chưa `completed`\n- 404 sản phẩm không tồn tại hoặc đã bị ẩn\n- 409 đã đánh giá sản phẩm này rồi\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 5,\n  \"comment\": \"Sản phẩm rất xinh, đóng gói cẩn thận\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Admin - Đăng nhập",
+      "description": "Admin không tự đăng ký; tài khoản tạo bằng seed. Mặc định `admin` / `Admin@123` (đọc từ `.env` `SEED_ADMIN_*` nếu có).",
+      "item": [
+        {
+          "name": "Đăng nhập Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Đăng nhập quản trị, set cookie `session` (role = admin). Mọi request trong các thư mục 5, 6, 7 yêu cầu đã chạy request này.\n\n**Body**: `username`, `password`.\n\n**Lưu ý**: cookie `session` dùng chung với Customer. Sau khi đăng nhập Admin, các request Customer sẽ trả 401 cho tới khi đăng nhập Customer lại.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"Admin@123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Admin - Quản lý đơn hàng",
+      "description": "Yêu cầu đã đăng nhập Admin. Không phải Admin thì mọi request trả 401.",
+      "item": [
+        {
+          "name": "Danh sách tất cả đơn",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/orders?status=pending",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "pending",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Tất cả đơn hàng (mới nhất trước), kèm `orderItems`, `product` và thông tin thanh toán (`paymentMethod`, `isPaid`, `paidAt`).\n\n**Query** (tùy chọn): `status` = `pending` | `confirmed` | `shipped` | `completed` | `cancelled`.\n\n**Lỗi**: 401 không phải Admin; 400 giá trị `status` không hợp lệ.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`."
+          }
+        },
+        {
+          "name": "Đổi trạng thái / hủy đơn",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "orders",
+                "{{orderId}}"
+              ]
+            },
+            "description": "Đổi trạng thái đơn theo luật chuyển:\n\n| Từ | Được chuyển tới |\n|---|---|\n| `pending` | `confirmed`, `cancelled` |\n| `confirmed` | `shipped`, `cancelled` |\n| `shipped` | `completed` |\n| `completed`, `cancelled` | (trạng thái cuối, không đổi được) |\n\n**Luật thanh toán**: đơn `bank_transfer` mà `isPaid = false` thì chỉ được chuyển sang `cancelled`. Muốn xác nhận hay giao hàng phải gọi request \"Xác nhận đã nhận tiền\" trước. Đơn COD không bị ràng buộc này.\n\nHủy đơn (`cancelled`) hoàn lại kho trong cùng một transaction. Hủy đơn đã thanh toán không tự hoàn tiền, shop tự chuyển khoản trả khách.\n\n**Body**: `status`.\n\n**Mã phản hồi**:\n- 200 thành công, trả đơn đã cập nhật\n- 400 `id` hoặc `status` không hợp lệ, chuyển sai luật (thông báo dạng `Không thể chuyển đơn từ \"x\" sang \"y\"`), hoặc đơn chuyển khoản chưa nhận tiền (thông báo \"Đơn chuyển khoản chưa nhận được tiền...\")\n- 401 không phải Admin\n- 404 không tìm thấy đơn\n- 409 đơn vừa được người khác cập nhật\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"confirmed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Xác nhận đã nhận tiền (chuyển khoản)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/orders/{{orderId}}/payment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "orders",
+                "{{orderId}}",
+                "payment"
+              ]
+            },
+            "description": "Admin xác nhận đã nhận được tiền chuyển khoản của đơn: đặt `isPaid = true` và `paidAt` = thời điểm hiện tại. Không đổi trạng thái đơn, việc `confirmed` vẫn gọi riêng ở request \"Đổi trạng thái / hủy đơn\".\n\n**Không có body.**\n\n**Mã phản hồi**:\n- 200 thành công, trả đơn đã cập nhật (`isPaid = true`)\n- 400 `id` không hợp lệ, đơn không phải chuyển khoản (COD), hoặc đơn đã bị hủy\n- 401 không phải Admin\n- 404 không tìm thấy đơn\n- 409 đơn đã được xác nhận thanh toán rồi, hoặc vừa được người khác cập nhật\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Admin - Quản lý sản phẩm",
+      "description": "CRUD sản phẩm, xóa mềm qua `isActive` (không xóa dòng khỏi DB vì đơn hàng và đánh giá đang tham chiếu). Yêu cầu đã đăng nhập Admin.",
+      "item": [
+        {
+          "name": "Danh sách sản phẩm (gồm cả đã ẩn)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/products?q=nến&status=active&categoryId=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "nến",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "disabled": true
+                },
+                {
+                  "key": "categoryId",
+                  "value": "1",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "**Query** (tùy chọn): `q` tìm theo tên; `status` = `active` | `inactive`; `categoryId`.\n\nGiá (`price`) trả về dạng số.\n\n**Lỗi**: 401 không phải Admin.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`."
+          }
+        },
+        {
+          "name": "Thêm sản phẩm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "products"
+              ]
+            },
+            "description": "**Body**:\n- `name` (2 đến 255 ký tự)\n- `price` (số lớn hơn 0)\n- `stock` (số nguyên từ 0)\n- `categoryId` (danh mục phải tồn tại)\n- `description`, `imageUrl` (tùy chọn)\n\n**Mã phản hồi**: 201 thành công; 400 dữ liệu sai hoặc danh mục không tồn tại; 401 không phải Admin.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nến thơm lavender\",\n  \"description\": \"Nến thơm handmade hương oải hương\",\n  \"price\": 120000,\n  \"stock\": 10,\n  \"imageUrl\": \"\",\n  \"categoryId\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Sửa sản phẩm / bật tắt hiển thị",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/products/{{adminProductId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "products",
+                "{{adminProductId}}"
+              ]
+            },
+            "description": "Chỉ cần gửi các trường muốn đổi. Có thể gửi `isActive` (true/false) để hiện hoặc ẩn sản phẩm.\n\n**Mã phản hồi**: 200 thành công; 400 dữ liệu sai, body rỗng hoặc danh mục không tồn tại; 401 không phải Admin; 404 không tìm thấy sản phẩm.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nến thơm lavender (mới)\",\n  \"stock\": 25\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Ẩn sản phẩm (xóa mềm)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/products/{{adminProductId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "products",
+                "{{adminProductId}}"
+              ]
+            },
+            "description": "Đặt `isActive = false`, sản phẩm biến khỏi trang chủ, trang chi tiết trả 404. Dùng `PATCH` với `{\"isActive\": true}` để hiện lại.\n\n**Mã phản hồi**: 200 thành công; 400 mã không hợp lệ; 401 không phải Admin; 404 không tìm thấy.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Admin - Danh mục",
+      "description": "Yêu cầu đã đăng nhập Admin.",
+      "item": [
+        {
+          "name": "Danh sách danh mục",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "categories"
+              ]
+            },
+            "description": "Trả về `id` và `name` của các danh mục, dùng để chọn `categoryId` khi thêm hoặc sửa sản phẩm. Lỗi 401 nếu không phải Admin.\n\nĐịnh dạng phản hồi thống nhất: thành công `{ \"success\": true, \"data\": ... }`, thất bại `{ \"success\": false, \"message\": \"...\" }`."
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "productId",
+      "value": "16"
+    },
+    {
+      "key": "orderId",
+      "value": "1"
+    },
+    {
+      "key": "adminProductId",
+      "value": "16"
+    }
+  ]
+}
