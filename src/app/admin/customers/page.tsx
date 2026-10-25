@@ -24,6 +24,8 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "locked", label: "Đã khóa" },
 ];
 
+const LOYAL_ORDERS = 4;
+
 export default function AdminCustomersPage() {
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,6 +65,16 @@ export default function AdminCustomersPage() {
       active: customers.filter((c) => c.isActive).length,
       locked: customers.filter((c) => !c.isActive).length,
     }),
+    [customers],
+  );
+
+  const totalRevenue = useMemo(
+    () => customers.reduce((sum, c) => sum + c.totalSpent, 0),
+    [customers],
+  );
+
+  const maxSpent = useMemo(
+    () => Math.max(1, ...customers.map((c) => c.totalSpent)),
     [customers],
   );
 
@@ -114,25 +126,49 @@ export default function AdminCustomersPage() {
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-moss-dark">
-            Quản trị
-          </p>
-          <h1 className="font-heading text-3xl text-ink">Sổ khách hàng</h1>
-        </div>
-        <p className="text-sm text-ink/60">
-          {counts.all} khách, trong đó {counts.locked} tài khoản đang bị khóa
-        </p>
-      </div>
+      <p className="text-xs font-semibold uppercase tracking-widest text-moss-dark">
+        Quản trị
+      </p>
+      <h1 className="font-heading text-3xl text-ink sm:text-4xl">
+        Sổ khách hàng
+      </h1>
 
-      <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center">
+      <dl className="mt-6 grid grid-cols-2 overflow-hidden rounded-2xl bg-ink text-paper md:grid-cols-4">
+        <div className="border-b border-r border-paper/10 px-5 py-4 md:border-b-0">
+          <dt className="text-xs uppercase tracking-wider text-paper/60">
+            Tổng khách
+          </dt>
+          <dd className="font-heading text-3xl">{counts.all}</dd>
+        </div>
+        <div className="border-b border-paper/10 px-5 py-4 md:border-b-0 md:border-r">
+          <dt className="text-xs uppercase tracking-wider text-paper/60">
+            Đang hoạt động
+          </dt>
+          <dd className="font-heading text-3xl">{counts.active}</dd>
+        </div>
+        <div className="border-r border-paper/10 px-5 py-4">
+          <dt className="text-xs uppercase tracking-wider text-paper/60">
+            Đã khóa
+          </dt>
+          <dd className="font-heading text-3xl text-ochre">{counts.locked}</dd>
+        </div>
+        <div className="px-5 py-4">
+          <dt className="text-xs uppercase tracking-wider text-paper/60">
+            Tổng tiền khách đã mua
+          </dt>
+          <dd className="font-heading text-2xl sm:text-3xl">
+            {money(totalRevenue)}
+          </dd>
+        </div>
+      </dl>
+
+      <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Tìm theo tên, email hoặc số điện thoại"
-          className="w-full rounded-full border border-ink/15 bg-white px-5 py-2.5 text-sm text-ink outline-none focus:border-moss md:max-w-md"
+          className="w-full rounded-full border border-ink/15 bg-white px-5 py-2.5 text-sm text-ink outline-none focus:border-moss lg:max-w-md"
         />
         <div className="flex flex-wrap gap-2">
           {FILTERS.map((f) => (
@@ -143,7 +179,7 @@ export default function AdminCustomersPage() {
               className={
                 "rounded-full px-4 py-2 text-sm transition " +
                 (filter === f.key
-                  ? "bg-ink text-paper"
+                  ? "bg-moss text-white"
                   : "bg-blush text-ink hover:bg-peach/60")
               }
             >
@@ -159,43 +195,52 @@ export default function AdminCustomersPage() {
         </p>
       )}
 
-      <div className="mt-6 overflow-hidden rounded-3xl bg-card shadow-warm">
-        <div className="hidden grid-cols-[2.5fr_0.8fr_1.2fr_1fr_1.3fr] gap-4 border-b border-ink/10 px-6 py-3 text-xs font-semibold uppercase tracking-wider text-ink/50 md:grid">
-          <span>Khách hàng</span>
-          <span>Số đơn</span>
-          <span>Tổng đã mua</span>
-          <span>Trạng thái</span>
-          <span className="text-right">Thao tác</span>
-        </div>
+      {loading ? (
+        <p className="mt-10 text-center text-sm text-ink/50">
+          Đang tải danh sách...
+        </p>
+      ) : visible.length === 0 ? (
+        <p className="mt-10 text-center text-sm text-ink/50">
+          Không có khách hàng nào phù hợp.
+        </p>
+      ) : (
+        <ul className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {visible.map((c) => {
+            const initial = c.name.trim().charAt(0).toUpperCase();
+            const pct = Math.round((c.totalSpent / maxSpent) * 100);
+            const isNew = c.orderCount === 0;
+            const isLoyal = c.orderCount >= LOYAL_ORDERS;
 
-        {loading ? (
-          <p className="px-6 py-10 text-center text-sm text-ink/50">
-            Đang tải danh sách...
-          </p>
-        ) : visible.length === 0 ? (
-          <p className="px-6 py-10 text-center text-sm text-ink/50">
-            Không có khách hàng nào phù hợp.
-          </p>
-        ) : (
-          <ul className="divide-y divide-ink/10">
-            {visible.map((c) => (
+            // Màu chỉ để báo trạng thái, không trang trí
+            const avatarClass = !c.isActive
+              ? "bg-ink/10 text-ink/40"
+              : isLoyal
+                ? "bg-moss text-white"
+                : isNew
+                  ? "bg-paper text-ink/50 ring-1 ring-ink/15"
+                  : "bg-blush text-moss-dark";
+
+            return (
               <li
                 key={c.id}
-                className="grid gap-3 px-6 py-4 md:grid-cols-[2.5fr_0.8fr_1.2fr_1fr_1.3fr] md:items-center md:gap-4"
+                className={
+                  "flex flex-col rounded-2xl bg-card p-5 ring-1 ring-ink/10 transition hover:-translate-y-0.5 hover:shadow-warm " +
+                  (c.isActive ? "" : "opacity-60")
+                }
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-start gap-4">
                   <span
                     className={
-                      "flex h-11 w-11 shrink-0 items-center justify-center rounded-full font-heading text-lg " +
-                      (c.isActive
-                        ? "bg-blush text-moss-dark"
-                        : "bg-ink/10 text-ink/40")
+                      "flex h-14 w-14 shrink-0 items-center justify-center rounded-full font-heading text-2xl " +
+                      avatarClass
                     }
                   >
-                    {c.name.trim().charAt(0).toUpperCase()}
+                    {initial}
                   </span>
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-ink">{c.name}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-heading text-xl text-ink">
+                      {c.name}
+                    </p>
                     <p className="truncate text-sm text-ink/60">{c.email}</p>
                     <p className="text-sm text-ink/60">
                       {c.phone ?? "Chưa có số điện thoại"}
@@ -203,35 +248,43 @@ export default function AdminCustomersPage() {
                   </div>
                 </div>
 
-                <p className="text-sm text-ink">
-                  <span className="text-ink/50 md:hidden">Số đơn: </span>
-                  {c.orderCount}
-                </p>
-
-                <p className="text-sm font-medium text-ink">
-                  <span className="font-normal text-ink/50 md:hidden">
-                    Tổng đã mua:{" "}
-                  </span>
-                  {money(c.totalSpent)}
-                </p>
-
-                <div>
-                  <span
-                    className={
-                      "inline-block rounded-full px-3 py-1 text-xs font-medium " +
-                      (c.isActive
-                        ? "bg-emerald-100 text-emerald-800"
-                        : "bg-ochre/30 text-ink")
-                    }
-                  >
-                    {c.isActive ? "Hoạt động" : "Đã khóa"}
-                  </span>
+                <div className="mt-3 min-h-6">
+                  {!c.isActive ? (
+                    <span className="rounded-full bg-ink px-2.5 py-0.5 text-[11px] font-semibold text-paper">
+                      Đã khóa
+                    </span>
+                  ) : isLoyal ? (
+                    <span className="rounded-full bg-ochre/30 px-2.5 py-0.5 text-[11px] font-semibold text-ink">
+                      ★ Khách thân thiết
+                    </span>
+                  ) : isNew ? (
+                    <span className="rounded-full bg-blush px-2.5 py-0.5 text-[11px] font-semibold text-moss-dark">
+                      Mới, chưa có đơn
+                    </span>
+                  ) : null}
                 </div>
 
-                <div className="flex gap-2 md:justify-end">
+                <div className="mt-3">
+                  <div className="flex items-baseline justify-between text-sm">
+                    <span className="font-medium text-ink">
+                      {money(c.totalSpent)}
+                    </span>
+                    <span className="text-xs text-ink/50">
+                      {c.orderCount} đơn
+                    </span>
+                  </div>
+                  <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-ink/10">
+                    <div
+                      className="h-full rounded-full bg-moss"
+                      style={{ width: pct + "%" }}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-5 flex gap-2">
                   <Link
                     href={"/admin/customers/" + c.id}
-                    className="rounded-full border border-ink/20 px-4 py-1.5 text-sm text-ink transition hover:border-ink"
+                    className="flex-1 rounded-full bg-blush px-4 py-2 text-center text-sm text-ink transition hover:bg-peach/60"
                   >
                     Chi tiết
                   </Link>
@@ -240,9 +293,9 @@ export default function AdminCustomersPage() {
                     disabled={busyId === c.id}
                     onClick={() => toggleLock(c)}
                     className={
-                      "rounded-full px-4 py-1.5 text-sm font-medium transition disabled:opacity-50 " +
+                      "flex-1 rounded-full px-4 py-2 text-sm font-medium transition disabled:opacity-50 " +
                       (c.isActive
-                        ? "bg-ink text-paper hover:bg-ink/80"
+                        ? "border border-ink/20 text-ink hover:border-ink"
                         : "bg-moss text-white hover:bg-moss-dark")
                     }
                   >
@@ -254,10 +307,10 @@ export default function AdminCustomersPage() {
                   </button>
                 </div>
               </li>
-            ))}
-          </ul>
-        )}
-      </div>
+            );
+          })}
+        </ul>
+      )}
     </main>
   );
 }
