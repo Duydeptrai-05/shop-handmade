@@ -60,6 +60,9 @@ export default async function Header() {
               <Link href="/admin/products" className={linkClass}>
                 Quản lý sản phẩm
               </Link>
+              <Link href="/admin/customers" className={linkClass}>
+                Khách hàng
+              </Link>
               <LogoutButton redirectTo="/admin/login" className={linkClass} />
             </>
           ) : role === "customer" ? (

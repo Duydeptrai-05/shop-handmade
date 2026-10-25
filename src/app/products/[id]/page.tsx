@@ -6,6 +6,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import AddToCartButton from "../../../components/AddToCartButton";
 import ReviewForm from "../../../components/ReviewForm";
+import { getAlsoBought } from "../../../../lib/recommendations";
 
 // Từ ngưỡng này trở xuống thì báo "Chỉ còn ..." để khách biết món sắp hết
 const LOW_STOCK = 5;
@@ -34,6 +35,7 @@ export default async function ProductDetailPage({
   ]);
 
   if (!product) notFound();
+  const alsoBought = await getAlsoBought(product.id, 4);
 
   const reviewCount = product.reviews.length;
   const averageRating =
@@ -210,6 +212,48 @@ export default async function ProductDetailPage({
 
         <ReviewForm productId={product.id} />
       </section>
+      {/* Gợi ý đi kèm: dải cuộn ngang */}
+      {alsoBought.length > 0 && (
+        <section className="mt-20">
+          <div className="border-b border-ink/15 pb-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-moss-dark">
+              Gợi ý đi kèm
+            </p>
+            <h2 className="mt-1 text-2xl font-semibold sm:text-3xl">
+              Khách mua món này cũng mua
+            </h2>
+          </div>
+
+          <ul className="mt-6 flex snap-x gap-4 overflow-x-auto pb-3">
+            {alsoBought.map((p) => (
+              <li key={p.id} className="w-72 shrink-0 snap-start">
+                <Link
+                  href={`/products/${p.id}`}
+                  className="flex items-center gap-4 rounded-lg border border-peach/50 bg-white p-3 shadow-warm transition-colors hover:border-moss-dark"
+                >
+                  <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-md bg-blush/40">
+                    <Image
+                      src={p.imageUrl ?? "/images/products/placeholder.jpg"}
+                      alt={p.name}
+                      fill
+                      sizes="96px"
+                      className="object-cover"
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="line-clamp-2 font-medium leading-snug">
+                      {p.name}
+                    </p>
+                    <p className="mt-2 font-heading text-lg font-semibold text-moss-dark">
+                      {formatVND(Number(p.price))}
+                    </p>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </main>
   );
 }

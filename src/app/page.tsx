@@ -1,5 +1,7 @@
 import ProductCarousel from "../components/ProductCarousel";
 import { getPopularProducts } from "../../lib/popular-products";
+import { getCurrentCustomer } from "../../lib/auth";
+import { getRecommendationsForCustomer } from "../../lib/recommendations";
 import Reveal from "../components/Reveal";
 import Link from "next/link";
 
@@ -60,6 +62,18 @@ export default async function HomePage() {
 
   // 3 sản phẩm đầu có ảnh để xếp ở banner
   const heroProducts = carouselProducts.filter((p) => p.imageUrl).slice(0, 3);
+
+  // Gợi ý theo lịch sử mua: chỉ khi khách đã đăng nhập và từng mua hàng
+  // (khách chưa đăng nhập, Admin hoặc tài khoản bị khóa thì customer = null)
+  const customer = await getCurrentCustomer();
+  const recommended = customer
+    ? (await getRecommendationsForCustomer(customer.id, 4)).map((p) => ({
+        id: p.id,
+        name: p.name,
+        price: Number(p.price),
+        imageUrl: p.imageUrl,
+      }))
+    : [];
 
   return (
     <main className="mx-auto max-w-6xl px-4 pb-10 pt-6 sm:pt-10">
@@ -180,6 +194,50 @@ export default async function HomePage() {
           </div>
         ))}
       </section>
+
+      {/* Dành cho bạn: gợi ý theo lịch sử mua, chỉ hiện khi có gợi ý */}
+      {recommended.length > 0 && (
+        <section className="mt-16">
+          <Reveal>
+            <div className="grid gap-6 rounded-3xl bg-blush p-6 sm:p-8 lg:grid-cols-[0.8fr_2.2fr] lg:items-center">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-moss-dark">
+                  Gợi ý riêng
+                </p>
+                <h2 className="mt-1 text-3xl font-semibold">Dành cho bạn</h2>
+                <p className="mt-3 text-sm text-ink/70">
+                  Chọn theo những món bạn đã mua ở Cỏ May.
+                </p>
+              </div>
+
+              <ul className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                {recommended.map((p) => (
+                  <li key={p.id}>
+                    <Link href={`/products/${p.id}`} className="group block">
+                      <div className="aspect-square overflow-hidden rounded-2xl bg-white">
+                        {p.imageUrl && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={p.imageUrl}
+                            alt={p.name}
+                            className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                          />
+                        )}
+                      </div>
+                      <p className="mt-2 line-clamp-2 text-sm font-medium">
+                        {p.name}
+                      </p>
+                      <p className="text-sm font-semibold text-moss-dark">
+                        {formatPrice(p.price)}
+                      </p>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </Reveal>
+        </section>
+      )}
 
       {/* Sản phẩm nổi bật */}
       {featured.length > 0 && (

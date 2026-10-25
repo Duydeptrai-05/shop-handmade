@@ -13,6 +13,7 @@ Website bán đồ handmade (nến thơm, trang sức, quà tặng và phụ ki�
 ## Chức năng
 
 **Khách hàng**
+
 - Xem danh sách sản phẩm, tìm theo tên, lọc theo danh mục
 - Trang chi tiết sản phẩm, đánh giá và điểm sao trung bình
 - Đăng ký, đăng nhập
@@ -23,6 +24,7 @@ Website bán đồ handmade (nến thơm, trang sức, quà tặng và phụ ki�
 - Viết đánh giá (chỉ khi đã có đơn hoàn tất chứa đúng sản phẩm đó)
 
 **Quản trị (Admin)**
+
 - Trang tổng quan: doanh thu, biểu đồ theo ngày, sản phẩm bán chạy, sản phẩm sắp hết hàng
 - Quản lý đơn hàng: đổi trạng thái theo luật chuyển trạng thái, hủy đơn (hoàn kho), xác nhận đã nhận tiền chuyển khoản
 - Quản lý sản phẩm: thêm, sửa, ẩn/hiện sản phẩm
@@ -78,9 +80,9 @@ Yêu cầu: Node.js, MariaDB 11.x đang chạy trên máy.
 
 ## Tài khoản mẫu
 
-| Vai trò | Đăng nhập | Mật khẩu |
-|---|---|---|
-| Admin | `admin` (tại `/admin/login`) | `Admin@123` |
+| Vai trò  | Đăng nhập                                      | Mật khẩu       |
+| -------- | ---------------------------------------------- | -------------- |
+| Admin    | `admin` (tại `/admin/login`)                   | `Admin@123`    |
 | Customer | email của các khách mẫu trong `prisma/seed.ts` | `Customer@123` |
 
 Tài khoản Admin lấy từ `SEED_ADMIN_USERNAME` và `SEED_ADMIN_PASSWORD` trong `.env`. Admin và Customer dùng chung cookie `session`, nên khi thử cả hai vai trò hãy dùng thêm cửa sổ ẩn danh.
@@ -111,3 +113,4 @@ File Postman collection nằm ở `docs/shop-handmade_postman_collection.json`. 
 - Trừ kho và hoàn kho nằm trong `prisma.$transaction`.
 - Sản phẩm không bị xóa cứng mà chỉ ẩn (`isActive`), để không mất dữ liệu của các đơn cũ.
 - Chuyển khoản là đối soát thủ công: khách chuyển theo nội dung `COMAY <mã đơn>`, Admin kiểm tra tiền về rồi bấm xác nhận. Cổng thanh toán tự động (VNPay, MoMo) chưa làm.
+  & "C:\Program Files\MariaDB 11.8\bin\mysql.exe" -u root -p

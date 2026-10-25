@@ -50,11 +50,12 @@ model Product {
 // Customer
 // ------------------------------------------------------------
 model Customer {
-  id           Int    @id @default(autoincrement())
-  name         String @db.VarChar(255)
-  email        String @unique @db.VarChar(255)
+  id           Int     @id @default(autoincrement())
+  name         String  @db.VarChar(255)
+  email        String  @unique @db.VarChar(255)
   phone        String? @db.VarChar(20)
-  passwordHash String @map("password_hash") @db.VarChar(255) // bcryptjs
+  passwordHash String  @map("password_hash") @db.VarChar(255) // bcryptjs
+  isActive     Boolean @default(true) @map("is_active") // false = Admin đã khóa tài khoản
 
   orders  Order[]
   reviews Review[]

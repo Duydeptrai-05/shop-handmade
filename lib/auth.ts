@@ -56,11 +56,25 @@ export function clearAuthCookie(response: NextResponse) {
 }
 
 // Đọc + xác thực token từ cookie hiện tại (dùng ở API route "me" và Server Component)
+// Với khách (customer): kiểm tra lại trong DB, tài khoản bị khóa hoặc không còn tồn tại
+// thì coi như chưa đăng nhập, dù token vẫn còn hạn
 export async function getAuthPayload(): Promise<TokenPayload | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value;
   if (!token) return null;
-  return verifyToken(token);
+
+  const payload = verifyToken(token);
+  if (!payload) return null;
+
+  if (payload.role === "customer") {
+    const customer = await prisma.customer.findUnique({
+      where: { id: payload.id },
+      select: { isActive: true },
+    });
+    if (!customer || !customer.isActive) return null;
+  }
+
+  return payload;
 }
 
 // Lấy thông tin Customer đang đăng nhập, dùng ở Server Component
@@ -72,8 +86,11 @@ export async function getCurrentCustomer() {
 
   const customer = await prisma.customer.findUnique({
     where: { id: payload.id },
-    select: { id: true, name: true, email: true },
+    select: { id: true, name: true, email: true, isActive: true },
   });
 
-  return customer;
+  // Khách đã bị Admin khóa thì coi như chưa đăng nhập
+  if (!customer || !customer.isActive) return null;
+
+  return { id: customer.id, name: customer.name, email: customer.email };
 }

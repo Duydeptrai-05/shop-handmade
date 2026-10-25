@@ -20,7 +20,13 @@ export async function POST(request: NextRequest) {
 
     const customer = await prisma.customer.findUnique({
       where: { email },
-      select: { id: true, name: true, email: true, passwordHash: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        passwordHash: true,
+        isActive: true,
+      },
     });
 
     if (!customer) {
@@ -39,6 +45,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { success: false, message: "Email hoặc mật khẩu không đúng" },
         { status: 401 },
+      );
+    }
+
+    // Kiểm tra khóa SAU khi mật khẩu đúng, để người lạ đoán email
+    // không biết được tài khoản nào đang bị khóa
+    if (!customer.isActive) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ shop để được hỗ trợ.",
+        },
+        { status: 403 },
       );
     }
 
