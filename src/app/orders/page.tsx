@@ -25,6 +25,9 @@ type Order = {
   paymentMethod: string; // "cod" | "bank_transfer"
   isPaid: boolean;
   paidAt: string | null;
+  shippingFee?: string; // Prisma Decimal -> chuỗi
+  discountAmount?: string;
+  shippingDiscount?: string;
   createdAt: string;
   orderItems: OrderItem[];
 };
@@ -63,11 +66,22 @@ const statusDot: Record<string, string> = {
   cancelled: "bg-ink/30",
 };
 
-function orderTotal(order: Order) {
+// Tiền hàng (chưa tính ship và giảm giá)
+function itemsSubtotal(order: Order) {
   return order.orderItems.reduce(
     (sum, item) => sum + Number(item.priceAtOrder) * item.quantity,
     0,
   );
+}
+
+// Số khách phải trả = tiền hàng + phí ship - giảm giá hàng - giảm ship
+function orderTotal(order: Order) {
+  const total =
+    itemsSubtotal(order) +
+    Number(order.shippingFee ?? 0) -
+    Number(order.discountAmount ?? 0) -
+    Number(order.shippingDiscount ?? 0);
+  return Math.max(0, total);
 }
 
 function shortDate(iso: string) {
@@ -442,6 +456,10 @@ function OrderDetail({
   const stepIndex = FLOW.indexOf(order.status);
   const cancelled = order.status === "cancelled";
   const total = orderTotal(order);
+  const itemsTotal = itemsSubtotal(order);
+  const shippingFee = Number(order.shippingFee ?? 0);
+  const discountAmount = Number(order.discountAmount ?? 0);
+  const shippingDiscount = Number(order.shippingDiscount ?? 0);
 
   return (
     <div>
@@ -586,8 +604,8 @@ function OrderDetail({
         ))}
       </ul>
 
-      {/* Nơi nhận + tổng tiền */}
-      <div className="mt-6 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+      {/* Nơi nhận + tính tiền */}
+      <div className="mt-6 grid gap-6 sm:grid-cols-[1fr_minmax(0,18rem)] sm:items-end">
         <div className="text-sm">
           <p className="text-xs font-semibold uppercase tracking-wider text-ink/45">
             Giao tới
@@ -597,11 +615,36 @@ function OrderDetail({
           </p>
           <p className="whitespace-pre-line text-ink/65">{order.address}</p>
         </div>
-        <div className="rounded-2xl bg-ink px-6 py-4 text-paper sm:text-right">
-          <p className="text-xs text-paper/65">Tổng cộng</p>
-          <p className="font-heading text-3xl font-semibold leading-tight text-white">
-            {formatVND(total)}
-          </p>
+
+        <div>
+          <dl className="space-y-1.5 px-1 pb-3 text-sm">
+            <div className="flex justify-between gap-4">
+              <dt className="text-ink/55">Tiền hàng</dt>
+              <dd className="tabular-nums">{formatVND(itemsTotal)}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-ink/55">Phí vận chuyển</dt>
+              <dd className="tabular-nums">{formatVND(shippingFee)}</dd>
+            </div>
+            {discountAmount > 0 && (
+              <div className="flex justify-between gap-4 text-emerald-800">
+                <dt>Giảm giá đơn hàng</dt>
+                <dd className="tabular-nums">-{formatVND(discountAmount)}</dd>
+              </div>
+            )}
+            {shippingDiscount > 0 && (
+              <div className="flex justify-between gap-4 text-emerald-800">
+                <dt>Giảm phí vận chuyển</dt>
+                <dd className="tabular-nums">-{formatVND(shippingDiscount)}</dd>
+              </div>
+            )}
+          </dl>
+          <div className="rounded-2xl bg-ink px-6 py-4 text-paper sm:text-right">
+            <p className="text-xs text-paper/65">Tổng cộng</p>
+            <p className="font-heading text-3xl font-semibold leading-tight text-white">
+              {formatVND(total)}
+            </p>
+          </div>
         </div>
       </div>
 

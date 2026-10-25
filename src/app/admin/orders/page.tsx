@@ -22,6 +22,9 @@ type Order = {
   paymentMethod: string; // "cod" | "bank_transfer"
   isPaid: boolean;
   paidAt: string | null;
+  shippingFee?: string; // Prisma Decimal -> chuỗi
+  discountAmount?: string;
+  shippingDiscount?: string;
   createdAt: string;
   orderItems: OrderItem[];
 };
@@ -85,11 +88,22 @@ const actions: Record<
   cancelled: [],
 };
 
-function orderTotal(order: Order) {
-  return order.orderItems.reduce(
+// Tách các khoản tiền của một đơn
+function moneyParts(order: Order) {
+  const items = order.orderItems.reduce(
     (sum, item) => sum + Number(item.priceAtOrder) * item.quantity,
     0,
   );
+  const shipping = Number(order.shippingFee ?? 0);
+  const discount = Number(order.discountAmount ?? 0);
+  const shippingDiscount = Number(order.shippingDiscount ?? 0);
+  return { items, shipping, discount, shippingDiscount };
+}
+
+// Số khách phải trả = tiền hàng + phí ship - giảm giá hàng - giảm ship
+function orderTotal(order: Order) {
+  const m = moneyParts(order);
+  return Math.max(0, m.items + m.shipping - m.discount - m.shippingDiscount);
 }
 
 // Đơn chuyển khoản còn chờ Admin xác nhận đã nhận tiền
@@ -452,6 +466,8 @@ export default function AdminOrdersPage() {
           <AnimatePresence mode="popLayout" initial>
             {visible.map((order, index) => {
               const total = orderTotal(order);
+              const parts = moneyParts(order);
+              const saved = parts.discount + parts.shippingDiscount;
               const unpaid = needsPayment(order);
               // Đơn chuyển khoản chưa nhận tiền: chỉ được hủy (khớp luật ở API)
               const baseActions = actions[order.status] ?? [];
@@ -602,12 +618,19 @@ export default function AdminOrdersPage() {
                           </span>
                         </button>
 
-                        <p className="text-lg font-semibold">
-                          {formatVND(total)}
-                        </p>
+                        <div className="text-right">
+                          <p className="text-lg font-semibold">
+                            {formatVND(total)}
+                          </p>
+                          {saved > 0 && (
+                            <p className="text-xs text-emerald-800">
+                              Đã trừ giảm giá {formatVND(saved)}
+                            </p>
+                          )}
+                        </div>
                       </div>
 
-                      {/* Chi tiết: địa chỉ + danh sách sản phẩm */}
+                      {/* Chi tiết: địa chỉ + danh sách sản phẩm + tính tiền */}
                       <AnimatePresence initial={false}>
                         {isOpen && (
                           <motion.div
@@ -655,6 +678,45 @@ export default function AdminOrdersPage() {
                                   </li>
                                 ))}
                               </ul>
+
+                              <dl className="mt-4 space-y-1 border-t border-dashed border-ink/20 pt-3 text-sm">
+                                <div className="flex justify-between gap-4">
+                                  <dt className="text-ink/55">Tiền hàng</dt>
+                                  <dd className="tabular-nums">
+                                    {formatVND(parts.items)}
+                                  </dd>
+                                </div>
+                                <div className="flex justify-between gap-4">
+                                  <dt className="text-ink/55">
+                                    Phí vận chuyển
+                                  </dt>
+                                  <dd className="tabular-nums">
+                                    {formatVND(parts.shipping)}
+                                  </dd>
+                                </div>
+                                {parts.discount > 0 && (
+                                  <div className="flex justify-between gap-4 text-emerald-800">
+                                    <dt>Giảm giá đơn hàng</dt>
+                                    <dd className="tabular-nums">
+                                      -{formatVND(parts.discount)}
+                                    </dd>
+                                  </div>
+                                )}
+                                {parts.shippingDiscount > 0 && (
+                                  <div className="flex justify-between gap-4 text-emerald-800">
+                                    <dt>Giảm phí vận chuyển</dt>
+                                    <dd className="tabular-nums">
+                                      -{formatVND(parts.shippingDiscount)}
+                                    </dd>
+                                  </div>
+                                )}
+                                <div className="flex justify-between gap-4 border-t border-ink/10 pt-2 font-semibold">
+                                  <dt>Khách phải trả</dt>
+                                  <dd className="tabular-nums">
+                                    {formatVND(total)}
+                                  </dd>
+                                </div>
+                              </dl>
                             </div>
                           </motion.div>
                         )}
@@ -664,8 +726,8 @@ export default function AdminOrdersPage() {
                       <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-ink/10 pt-4">
                         {unpaid ? (
                           <span className="mr-auto text-sm text-ink/55">
-                            Chờ khách chuyển khoản, xác nhận khi tiền đã về tài
-                            khoản
+                            Chờ khách chuyển {formatVND(total)}, xác nhận khi
+                            tiền đã về tài khoản
                           </span>
                         ) : (
                           orderActions.length === 0 && (
