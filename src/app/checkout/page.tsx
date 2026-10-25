@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useCart } from "../../../lib/cart-context";
 import { formatVND } from "../../../lib/format";
+import { SHIPPING_FEE } from "../../../lib/shipping"; // VOUCHER
 import {
   createOrderSchema,
   type PaymentMethodValue,
@@ -14,8 +15,22 @@ type FieldName =
   | "phone"
   | "address"
   | "paymentMethod"
-  | "items";
+  | "items"
+  | "discountCode" // VOUCHER
+  | "shippingCode"; // VOUCHER
 type FieldErrors = Partial<Record<FieldName, string[]>>;
+
+// VOUCHER: kết quả xem trước tiền từ /api/orders/preview
+type Preview = {
+  subtotal: number;
+  shippingFee: number;
+  discountAmount: number;
+  shippingDiscount: number;
+  total: number;
+  discountVoucher: { code: string; description: string | null } | null;
+  shippingVoucher: { code: string; description: string | null } | null;
+  errors: { discountCode?: string; shippingCode?: string };
+};
 
 // Thông tin tài khoản nhận tiền, đọc từ .env (NEXT_PUBLIC_ để dùng được ở client)
 const BANK = {
@@ -61,6 +76,79 @@ function Step({
         <div className="mt-4">{children}</div>
       </div>
     </section>
+  );
+}
+
+// VOUCHER: một ô nhập mã dạng "vé" viền đứt
+function VoucherField({
+  id,
+  label,
+  hint,
+  value,
+  onChange,
+  error,
+  appliedCode,
+  amount,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (v: string) => void;
+  error?: string;
+  appliedCode?: string;
+  amount: number;
+}) {
+  return (
+    <div
+      className={`rounded-xl border-2 border-dashed bg-white px-4 py-3.5 transition ${
+        error ? "border-red-400" : appliedCode ? "border-moss" : "border-peach"
+      }`}
+    >
+      <label htmlFor={id} className="flex items-baseline justify-between gap-3">
+        <span className="text-sm font-semibold">{label}</span>
+        <span className="text-xs text-ink/50">{hint}</span>
+      </label>
+      <input
+        id={id}
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value.toUpperCase())}
+        placeholder="Nhập mã (không bắt buộc)"
+        autoComplete="off"
+        spellCheck={false}
+        className="mt-2 w-full bg-transparent font-mono text-base tracking-wider text-ink outline-none placeholder:font-sans placeholder:text-sm placeholder:tracking-normal placeholder:text-ink/35"
+      />
+      {error ? (
+        <p className="mt-2 text-xs text-red-700">{error}</p>
+      ) : appliedCode ? (
+        <p className="mt-2 text-xs font-medium text-moss-dark">
+          Đã áp dụng {appliedCode}: giảm {formatVND(amount)}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+// VOUCHER: một dòng trong khối tổng tiền
+function SummaryRow({
+  label,
+  value,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-4">
+      <dt className={accent ? "text-moss-dark" : "text-ink/65"}>{label}</dt>
+      <dd
+        className={`tabular-nums ${accent ? "font-medium text-moss-dark" : ""}`}
+      >
+        {value}
+      </dd>
+    </div>
   );
 }
 
@@ -249,17 +337,85 @@ export default function CheckoutPage() {
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodValue>("cod");
+  const [discountCode, setDiscountCode] = useState(""); // VOUCHER
+  const [shippingCode, setShippingCode] = useState(""); // VOUCHER
+  const [preview, setPreview] = useState<Preview | null>(null); // VOUCHER
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [needLogin, setNeedLogin] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [orderId, setOrderId] = useState<number | null>(null);
-  // Tổng tiền của đơn vừa đặt (lấy từ server), vì giỏ đã bị xóa sau khi đặt
+  // Số tiền khách phải trả của đơn vừa đặt (lấy từ server), vì giỏ đã bị xóa sau khi đặt
   const [orderTotal, setOrderTotal] = useState(0);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // VOUCHER: xem trước tiền mỗi khi giỏ hoặc mã thay đổi (chờ 0,4 giây sau khi ngừng gõ)
+  const itemsKey = items.map((i) => `${i.id}:${i.quantity}`).join(",");
+  useEffect(() => {
+    if (!mounted || items.length === 0 || orderId !== null) return;
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/orders/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: items.map((i) => ({
+              productId: i.id,
+              quantity: i.quantity,
+            })),
+            discountCode: discountCode.trim() || null,
+            shippingCode: shippingCode.trim() || null,
+          }),
+          signal: controller.signal,
+        });
+        const json = await res.json();
+        if (res.ok && json.success) {
+          setPreview(json.data as Preview);
+        } else {
+          setPreview(null); // chưa đăng nhập hoặc lỗi: dùng số tạm tính ở client
+        }
+      } catch {
+        // Bị hủy do gõ tiếp hoặc mất kết nối: bỏ qua
+      }
+    }, 400);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted, itemsKey, discountCode, shippingCode, orderId]);
+
+  // VOUCHER: số tiền hiển thị (ưu tiên số server tính, chưa có thì tạm tính)
+  const subtotal = preview?.subtotal ?? totalPrice;
+  const shippingFee = preview?.shippingFee ?? SHIPPING_FEE;
+  const discountAmount = preview?.discountAmount ?? 0;
+  const shippingDiscount = preview?.shippingDiscount ?? 0;
+  const payable =
+    preview?.total ??
+    totalPrice - discountAmount + shippingFee - shippingDiscount;
+
+  const discountError = discountCode.trim()
+    ? (preview?.errors?.discountCode ?? fieldErrors.discountCode?.[0])
+    : undefined;
+  const shippingError = shippingCode.trim()
+    ? (preview?.errors?.shippingCode ?? fieldErrors.shippingCode?.[0])
+    : undefined;
+
+  function changeDiscountCode(v: string) {
+    setDiscountCode(v);
+    setFieldErrors((prev) => ({ ...prev, discountCode: undefined }));
+  }
+
+  function changeShippingCode(v: string) {
+    setShippingCode(v);
+    setFieldErrors((prev) => ({ ...prev, shippingCode: undefined }));
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -268,12 +424,14 @@ export default function CheckoutPage() {
     setFormError(null);
     setNeedLogin(false);
 
-    // Chỉ gửi productId + quantity, KHÔNG gửi giá/tên (server tự tính lại từ DB)
+    // Chỉ gửi productId + quantity + mã, KHÔNG gửi giá/tên (server tự tính lại từ DB)
     const payload = {
       customerName,
       phone,
       address,
       paymentMethod,
+      discountCode: discountCode.trim() || null, // VOUCHER
+      shippingCode: shippingCode.trim() || null, // VOUCHER
       items: items.map((i) => ({ productId: i.id, quantity: i.quantity })),
     };
 
@@ -295,16 +453,20 @@ export default function CheckoutPage() {
       const json = await res.json();
 
       if (res.ok && json.success) {
-        // Tổng tiền tính từ giá đã đóng băng trong đơn, không dùng giá ở client
+        // Số tiền phải trả tính từ các khoản đã đóng băng trong đơn, không dùng giá ở client
         const orderItems = (json.data.orderItems ?? []) as {
           priceAtOrder: string | number;
           quantity: number;
         }[];
+        const itemsTotal = orderItems.reduce(
+          (sum, it) => sum + Number(it.priceAtOrder) * it.quantity,
+          0,
+        );
         setOrderTotal(
-          orderItems.reduce(
-            (sum, it) => sum + Number(it.priceAtOrder) * it.quantity,
-            0,
-          ),
+          itemsTotal -
+            Number(json.data.discountAmount ?? 0) +
+            Number(json.data.shippingFee ?? 0) -
+            Number(json.data.shippingDiscount ?? 0),
         );
         setOrderId(json.data.id);
         clearCart();
@@ -314,7 +476,10 @@ export default function CheckoutPage() {
       if (res.status === 401) {
         setNeedLogin(true);
       }
-      if (json.errors) {
+      // VOUCHER: lỗi mã gắn đúng ô, các lỗi khác như cũ
+      if (json.field) {
+        setFieldErrors({ [json.field]: [json.message] } as FieldErrors);
+      } else if (json.errors) {
         setFieldErrors(json.errors as FieldErrors);
       }
       setFormError(json.message ?? "Có lỗi xảy ra, vui lòng thử lại");
@@ -646,7 +811,45 @@ export default function CheckoutPage() {
           )}
         </Step>
 
-        <Step no={3} title="Thanh toán" last>
+        {/* VOUCHER: bước nhập mã giảm giá */}
+        <Step no={3} title="Mã giảm giá">
+          <p className="mb-4 text-sm text-ink/60">
+            Mỗi đơn dùng được 1 mã giảm tiền hàng và 1 mã giảm phí ship cùng
+            lúc.
+          </p>
+          <div className="space-y-3">
+            <VoucherField
+              id="discountCode"
+              label="Mã giảm tiền hàng"
+              hint="Trừ vào tiền hàng"
+              value={discountCode}
+              onChange={changeDiscountCode}
+              error={discountError}
+              appliedCode={
+                discountCode.trim() && !discountError
+                  ? preview?.discountVoucher?.code
+                  : undefined
+              }
+              amount={discountAmount}
+            />
+            <VoucherField
+              id="shippingCode"
+              label="Mã giảm phí ship"
+              hint="Trừ vào phí vận chuyển"
+              value={shippingCode}
+              onChange={changeShippingCode}
+              error={shippingError}
+              appliedCode={
+                shippingCode.trim() && !shippingError
+                  ? preview?.shippingVoucher?.code
+                  : undefined
+              }
+              amount={shippingDiscount}
+            />
+          </div>
+        </Step>
+
+        <Step no={4} title="Thanh toán" last>
           <div
             role="radiogroup"
             aria-label="Phương thức thanh toán"
@@ -672,6 +875,32 @@ export default function CheckoutPage() {
             </p>
           )}
         </Step>
+
+        {/* VOUCHER: khối tổng tiền */}
+        <dl className="mt-8 space-y-2.5 rounded-2xl bg-blush px-5 py-5 text-sm">
+          <SummaryRow label="Tiền hàng" value={formatVND(subtotal)} />
+          {discountAmount > 0 && (
+            <SummaryRow
+              label={`Giảm giá${preview?.discountVoucher ? ` (${preview.discountVoucher.code})` : ""}`}
+              value={`- ${formatVND(discountAmount)}`}
+              accent
+            />
+          )}
+          <SummaryRow label="Phí vận chuyển" value={formatVND(shippingFee)} />
+          {shippingDiscount > 0 && (
+            <SummaryRow
+              label={`Giảm phí ship${preview?.shippingVoucher ? ` (${preview.shippingVoucher.code})` : ""}`}
+              value={`- ${formatVND(shippingDiscount)}`}
+              accent
+            />
+          )}
+          <div className="flex items-baseline justify-between gap-4 border-t border-peach/60 pt-3">
+            <dt className="font-semibold">Tổng cộng</dt>
+            <dd className="font-heading text-2xl font-semibold tabular-nums">
+              {formatVND(payable)}
+            </dd>
+          </div>
+        </dl>
 
         {formError && (
           <div
@@ -700,7 +929,7 @@ export default function CheckoutPage() {
         >
           {submitting
             ? "Đang xử lý..."
-            : `Xác nhận đặt hàng · ${formatVND(totalPrice)}`}
+            : `Xác nhận đặt hàng · ${formatVND(payable)}`}
         </button>
         <p className="mt-3 text-center text-sm text-ink/55">
           Shop sẽ gọi điện xác nhận trước khi giao hàng.
