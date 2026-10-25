@@ -2,14 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../lib/prisma";
 import { getAuthPayload } from "../../../../lib/auth";
 import { createOrderSchema } from "../../../../lib/validation/order";
-import { cancelExpiredBankOrders } from "../../../../lib/expire-orders"; // MỚI
+import { cancelExpiredBankOrders } from "../../../../lib/expire-orders";
+import { calcOrderTotals, toVoucherRule } from "../../../../lib/shipping"; // VOUCHER
+import { resolveOrderVouchers } from "../../../../lib/vouchers"; // VOUCHER
 
 // Lỗi nghiệp vụ có status HTTP riêng (khác lỗi hệ thống 500)
 class OrderError extends Error {
   status: number;
-  constructor(message: string, status = 400) {
+  field?: "discountCode" | "shippingCode"; // VOUCHER: lỗi thuộc ô mã nào
+  constructor(
+    message: string,
+    status = 400,
+    field?: "discountCode" | "shippingCode",
+  ) {
     super(message);
     this.status = status;
+    this.field = field;
   }
 }
 
@@ -24,8 +32,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // MỚI: hủy các đơn chuyển khoản quá hạn trước để hoàn kho,
-    // rồi mới kiểm tra tồn kho cho đơn này. Lỗi ở bước này không được chặn việc đặt hàng.
+    // Hủy các đơn chuyển khoản quá hạn trước để hoàn kho (và hoàn lượt dùng mã),
+    // rồi mới kiểm tra cho đơn này. Lỗi ở bước này không được chặn việc đặt hàng.
     await cancelExpiredBankOrders().catch((e) =>
       console.error("cancelExpiredBankOrders (POST /api/orders):", e),
     );
@@ -66,8 +74,36 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 4. Transaction: tạo Order + OrderItem, đồng thời trừ tồn kho
+    // VOUCHER: tiền hàng tính từ giá trong DB
+    const subtotal = input.items.reduce(
+      (sum, item) =>
+        sum + Number(productMap.get(item.productId)!.price) * item.quantity,
+      0,
+    );
+
+    // 4. Transaction: kiểm tra voucher, trừ tồn kho, tạo Order + OrderItem
     const order = await prisma.$transaction(async (tx) => {
+      // VOUCHER: kiểm tra 2 ô mã ngay trong transaction
+      const vouchers = await resolveOrderVouchers(tx, {
+        discountCode: input.discountCode,
+        shippingCode: input.shippingCode,
+        customerId: payload.id,
+        subtotal,
+      });
+      if (vouchers.ok === false) {
+        throw new OrderError(vouchers.message, 400, vouchers.field);
+      }
+
+      const totals = calcOrderTotals({
+        subtotal,
+        discountVoucher: vouchers.discountVoucher
+          ? toVoucherRule(vouchers.discountVoucher)
+          : null,
+        shippingVoucher: vouchers.shippingVoucher
+          ? toVoucherRule(vouchers.shippingVoucher)
+          : null,
+      });
+
       // Trừ kho từng sản phẩm, điều kiện stock >= quantity ngay trong câu
       // update để tránh race condition (2 người đặt cùng lúc, hàng còn ít)
       for (const item of input.items) {
@@ -90,6 +126,12 @@ export async function POST(request: NextRequest) {
           phone: input.phone,
           address: input.address,
           paymentMethod: input.paymentMethod,
+          // VOUCHER: các khoản tiền "đóng băng" tại lúc đặt
+          shippingFee: totals.shippingFee,
+          discountAmount: totals.discountAmount,
+          shippingDiscount: totals.shippingDiscount,
+          discountVoucherId: vouchers.discountVoucher?.id ?? null,
+          shippingVoucherId: vouchers.shippingVoucher?.id ?? null,
           orderItems: {
             create: input.items.map((item) => ({
               productId: item.productId,
@@ -109,7 +151,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof OrderError) {
       return NextResponse.json(
-        { success: false, message: error.message },
+        { success: false, message: error.message, field: error.field },
         { status: error.status },
       );
     }
@@ -134,7 +176,7 @@ export async function GET() {
       );
     }
 
-    // MỚI: hủy đơn chuyển khoản quá hạn trước khi trả danh sách,
+    // Hủy đơn chuyển khoản quá hạn trước khi trả danh sách,
     // để khách thấy đúng trạng thái "Đã hủy"
     await cancelExpiredBankOrders().catch((e) =>
       console.error("cancelExpiredBankOrders (GET /api/orders):", e),

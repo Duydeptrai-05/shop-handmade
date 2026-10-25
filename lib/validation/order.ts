@@ -20,6 +20,8 @@ export const createOrderSchema = z.object({
   paymentMethod: z
     .enum(PAYMENT_METHODS, { message: "Phương thức thanh toán không hợp lệ" })
     .default("cod"),
+  discountCode: z.string().trim().max(50).nullish(), // mã giảm tiền hàng
+  shippingCode: z.string().trim().max(50).nullish(), // mã giảm phí ship
   items: z.array(orderItemSchema).min(1, "Giỏ hàng đang trống"),
 });
 
