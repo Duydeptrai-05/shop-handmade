@@ -43,7 +43,7 @@ export function proxy(request: NextRequest) {
     return redirectToLogin(request, ADMIN_LOGIN_PATH);
   }
 
-  // /checkout, /orders: chỉ role "customer"
+  // /checkout, /orders, /account: chỉ role "customer"
   if (role !== "customer") {
     return redirectToLogin(request, "/login");
   }
@@ -52,5 +52,10 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/checkout/:path*", "/orders/:path*", "/admin/:path*"],
+  matcher: [
+    "/checkout/:path*",
+    "/orders/:path*",
+    "/account/:path*",
+    "/admin/:path*",
+  ],
 };

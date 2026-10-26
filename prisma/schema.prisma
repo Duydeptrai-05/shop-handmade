@@ -57,10 +57,31 @@ model Customer {
   passwordHash String  @map("password_hash") @db.VarChar(255) // bcryptjs
   isActive     Boolean @default(true) @map("is_active") // false = Admin đã khóa tài khoản
 
-  orders  Order[]
-  reviews Review[]
+  orders    Order[]
+  reviews   Review[]
+  addresses Address[]
 
   @@map("customers")
+}
+
+// ------------------------------------------------------------
+// Address (sổ địa chỉ của khách)
+// Mỗi khách có nhiều địa chỉ, tối đa 1 địa chỉ mặc định (kiểm soát ở tầng API)
+// Đơn hàng vẫn lưu bản sao tên/SĐT/địa chỉ riêng nên sửa hay xóa địa chỉ ở đây không ảnh hưởng đơn cũ
+// ------------------------------------------------------------
+model Address {
+  id            Int      @id @default(autoincrement())
+  customerId    Int      @map("customer_id")
+  recipientName String   @map("recipient_name") @db.VarChar(255)
+  phone         String   @db.VarChar(20)
+  address       String   @db.VarChar(500)
+  isDefault     Boolean  @default(false) @map("is_default")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("addresses")
 }
 
 // ------------------------------------------------------------

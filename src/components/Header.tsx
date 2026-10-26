@@ -76,6 +76,9 @@ export default async function Header() {
               <CategoryMenu categories={categories} />
               <CartLink className={linkClass} />
               <OrdersLink className={linkClass} />
+              <Link href="/account" className={linkClass}>
+                Tài khoản
+              </Link>
               <LogoutButton redirectTo="/" className={linkClass} />
             </>
           ) : (
