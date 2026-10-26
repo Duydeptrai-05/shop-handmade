@@ -32,6 +32,15 @@ type Preview = {
   errors: { discountCode?: string; shippingCode?: string };
 };
 
+// Địa chỉ đã lưu trong sổ địa chỉ (từ /api/account/addresses)
+type SavedAddress = {
+  id: number;
+  recipientName: string;
+  phone: string;
+  address: string;
+  isDefault: boolean;
+};
+
 // Thông tin tài khoản nhận tiền, đọc từ .env (NEXT_PUBLIC_ để dùng được ở client)
 const BANK = {
   id: process.env.NEXT_PUBLIC_BANK_ID ?? "",
@@ -329,6 +338,71 @@ function TransferPanel({
   );
 }
 
+// Dải thẻ địa chỉ đã lưu: bấm một thẻ để điền sẵn tên, SĐT, địa chỉ
+function AddressPicker({
+  list,
+  selectedId,
+  onPick,
+}: {
+  list: SavedAddress[];
+  selectedId?: number;
+  onPick: (a: SavedAddress) => void;
+}) {
+  if (list.length === 0) return null;
+
+  return (
+    <section className="mt-10 rounded-2xl bg-blush px-5 py-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-sm font-semibold text-moss-dark">
+          Giao tới địa chỉ đã lưu
+        </h2>
+        <Link
+          href="/account"
+          className="text-xs text-ink/60 underline underline-offset-4 transition-colors hover:text-moss-dark"
+        >
+          Quản lý sổ địa chỉ
+        </Link>
+      </div>
+
+      <div className="-mx-1 mt-4 flex snap-x gap-3 overflow-x-auto px-1 pb-2">
+        {list.map((a) => {
+          const selected = a.id === selectedId;
+          return (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => onPick(a)}
+              aria-pressed={selected}
+              className={`w-60 shrink-0 snap-start rounded-xl border-2 bg-white px-4 py-3.5 text-left transition ${
+                selected
+                  ? "border-moss"
+                  : "border-transparent hover:border-peach"
+              }`}
+            >
+              <span className="flex items-center justify-between gap-2">
+                <span className="truncate font-semibold">
+                  {a.recipientName}
+                </span>
+                {a.isDefault && (
+                  <span className="shrink-0 rounded-full bg-ochre/30 px-2 py-0.5 text-[10px] font-semibold text-ink">
+                    Mặc định
+                  </span>
+                )}
+              </span>
+              <span className="mt-0.5 block text-sm tabular-nums text-ink/65">
+                {a.phone}
+              </span>
+              <span className="mt-1.5 line-clamp-2 block text-sm leading-snug text-ink/75">
+                {a.address}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export default function CheckoutPage() {
   const { items, clearCart, totalItems, totalPrice } = useCart();
 
@@ -340,6 +414,7 @@ export default function CheckoutPage() {
   const [discountCode, setDiscountCode] = useState(""); // VOUCHER
   const [shippingCode, setShippingCode] = useState(""); // VOUCHER
   const [preview, setPreview] = useState<Preview | null>(null); // VOUCHER
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [needLogin, setNeedLogin] = useState(false);
@@ -351,6 +426,54 @@ export default function CheckoutPage() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Tải sổ địa chỉ; có địa chỉ mặc định thì điền sẵn vào form (chỉ điền ô còn trống)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/account/addresses");
+        if (!res.ok) return; // chưa đăng nhập: bỏ qua, khách tự nhập
+        const json = await res.json();
+        if (cancelled || !json.success) return;
+
+        const list = json.data as SavedAddress[];
+        setSavedAddresses(list);
+
+        const def = list.find((a) => a.isDefault) ?? list[0];
+        if (def) {
+          setCustomerName((prev) => prev || def.recipientName);
+          setPhone((prev) => prev || def.phone);
+          setAddress((prev) => prev || def.address);
+        }
+      } catch {
+        // Lỗi mạng: bỏ qua, form vẫn nhập tay được
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function pickAddress(a: SavedAddress) {
+    setCustomerName(a.recipientName);
+    setPhone(a.phone);
+    setAddress(a.address);
+    setFieldErrors((prev) => ({
+      ...prev,
+      customerName: undefined,
+      phone: undefined,
+      address: undefined,
+    }));
+  }
+
+  // Thẻ nào đang khớp đúng với nội dung trong form thì được tô viền
+  const selectedAddressId = savedAddresses.find(
+    (a) =>
+      a.recipientName === customerName &&
+      a.phone === phone &&
+      a.address === address,
+  )?.id;
 
   // VOUCHER: xem trước tiền mỗi khi giỏ hoặc mã thay đổi (chờ 0,4 giây sau khi ngừng gõ)
   const itemsKey = items.map((i) => `${i.id}:${i.quantity}`).join(",");
@@ -749,7 +872,15 @@ export default function CheckoutPage() {
         </ul>
       </details>
 
-      <form onSubmit={handleSubmit} noValidate className="mt-10">
+      <form onSubmit={handleSubmit} noValidate>
+        <AddressPicker
+          list={savedAddresses}
+          selectedId={selectedAddressId}
+          onPick={pickAddress}
+        />
+
+        <div className="mt-10" />
+
         <Step no={1} title="Người nhận">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
