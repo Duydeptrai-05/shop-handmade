@@ -161,6 +161,14 @@ function LoginForm() {
                   {showPassword ? "Ẩn" : "Hiện"}
                 </button>
               </div>
+              <div className="mt-2 text-right">
+                <Link
+                  href="/forgot-password"
+                  className="text-sm font-medium text-moss-dark underline decoration-moss/40 underline-offset-4 transition-colors hover:text-ink"
+                >
+                  Quên mật khẩu?
+                </Link>
+              </div>
             </div>
 
             {error && (
