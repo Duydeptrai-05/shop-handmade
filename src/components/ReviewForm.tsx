@@ -9,6 +9,7 @@ type Status = {
   loggedIn: boolean;
   canReview: boolean;
   hasReviewed: boolean;
+  reviewStatus?: "pending" | "approved" | "hidden" | null;
 };
 
 // Chữ hiện bên dưới hàng sao, theo số sao đang chọn hoặc đang rê chuột
@@ -94,7 +95,12 @@ export default function ReviewForm({ productId }: { productId: number }) {
         setError(json.message);
         return;
       }
-      setStatus({ loggedIn: true, canReview: false, hasReviewed: true });
+      setStatus({
+        loggedIn: true,
+        canReview: false,
+        hasReviewed: true,
+        reviewStatus: "pending",
+      });
       router.refresh(); // tải lại danh sách review và sao trung bình
     } catch {
       setError("Không thể kết nối máy chủ");
@@ -128,6 +134,39 @@ export default function ReviewForm({ productId }: { productId: number }) {
   }
 
   if (status.hasReviewed) {
+    // Đánh giá đang chờ Admin duyệt: báo rõ để khách không tưởng gửi lỗi
+    if (status.reviewStatus === "pending") {
+      return (
+        <Notice
+          icon={
+            <svg {...iconProps}>
+              <circle cx="12" cy="12" r="8.5" />
+              <path d="M12 7.5V12l3 2" />
+            </svg>
+          }
+        >
+          <span className="font-semibold">Cảm ơn bạn!</span> Đánh giá của bạn
+          đang chờ cửa hàng duyệt, duyệt xong sẽ hiện ở trang này.
+        </Notice>
+      );
+    }
+
+    // Admin đã ẩn đánh giá này
+    if (status.reviewStatus === "hidden") {
+      return (
+        <Notice
+          icon={
+            <svg {...iconProps}>
+              <circle cx="12" cy="12" r="8.5" />
+              <path d="M12 7.5V12l3 2" />
+            </svg>
+          }
+        >
+          Đánh giá của bạn hiện không được hiển thị công khai.
+        </Notice>
+      );
+    }
+
     return (
       <Notice
         icon={

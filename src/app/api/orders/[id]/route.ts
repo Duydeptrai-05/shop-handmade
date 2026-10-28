@@ -3,6 +3,7 @@ import { prisma } from "../../../../../lib/prisma";
 import { getAuthPayload } from "../../../../../lib/auth";
 import { updateOrderSchema } from "../../../../../lib/validation/order";
 import { cancelExpiredBankOrders } from "../../../../../lib/expire-orders";
+import { logStockMovement } from "../../../../../lib/stock";
 
 class OrderError extends Error {
   status: number;
@@ -105,11 +106,19 @@ export async function PATCH(
           );
         }
 
-        // Hoàn kho cho từng món
+        // Hoàn kho cho từng món và ghi lịch sử
         for (const item of order.orderItems) {
           await tx.product.update({
             where: { id: item.productId },
             data: { stock: { increment: item.quantity } },
+          });
+
+          await logStockMovement(tx, {
+            productId: item.productId,
+            change: item.quantity,
+            reason: "cancel_restore",
+            orderId,
+            note: "Khách tự hủy đơn",
           });
         }
       });

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "../../../../../lib/prisma";
 import { getAuthPayload } from "../../../../../lib/auth";
 import { productSchema } from "../../../../../lib/validation/product";
+import { logStockMovement } from "../../../../../lib/stock"; // STOCK
+import { logAudit } from "../../../../../lib/audit"; // AUDIT
 
 // Kiểm tra đăng nhập Admin, trả về null nếu hợp lệ
 async function requireAdmin() {
@@ -67,6 +69,21 @@ export async function POST(request: Request) {
     const denied = await requireAdmin();
     if (denied) return denied;
 
+    // AUDIT: lấy Admin đang thao tác để ghi nhật ký
+    const payload = await getAuthPayload();
+    const admin = payload
+      ? await prisma.admin.findUnique({
+          where: { id: payload.id },
+          select: { id: true, username: true },
+        })
+      : null;
+    if (!admin) {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập quản trị" },
+        { status: 401 },
+      );
+    }
+
     let body: unknown;
     try {
       body = await request.json();
@@ -99,16 +116,42 @@ export async function POST(request: Request) {
       );
     }
 
-    const created = await prisma.product.create({
-      data: {
-        name: input.name,
-        description: input.description ?? null,
-        price: input.price,
-        imageUrl: input.imageUrl ?? null,
-        stock: input.stock,
-        categoryId: input.categoryId,
-        // isActive dùng mặc định true trong schema
-      },
+    const created = await prisma.$transaction(async (tx) => {
+      const product = await tx.product.create({
+        data: {
+          name: input.name,
+          description: input.description ?? null,
+          price: input.price,
+          imageUrl: input.imageUrl ?? null,
+          stock: input.stock,
+          categoryId: input.categoryId,
+          // isActive dùng mặc định true trong schema
+        },
+      });
+
+      // STOCK: tồn ban đầu > 0 thì ghi là nhập hàng
+      if (product.stock > 0) {
+        await logStockMovement(tx, {
+          productId: product.id,
+          change: product.stock,
+          reason: "import",
+          note: "Tồn kho ban đầu khi tạo sản phẩm",
+        });
+      }
+
+      // AUDIT: ghi nhật ký tạo sản phẩm
+      await logAudit(
+        tx,
+        { id: admin.id, username: admin.username },
+        {
+          action: "product.create",
+          entityType: "product",
+          entityId: product.id,
+          summary: `Tạo sản phẩm "${product.name}" (#${product.id})`,
+        },
+      );
+
+      return product;
     });
 
     return NextResponse.json(

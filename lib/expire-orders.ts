@@ -1,7 +1,8 @@
 import { prisma } from "./prisma";
+import { logStockMovement } from "./stock"; // STOCK
 
 // Thời hạn chuyển khoản (phút). Đang để 1 để test, xong phải đổi lại 15.
-export const BANK_TRANSFER_TIMEOUT_MINUTES = 1;
+export const BANK_TRANSFER_TIMEOUT_MINUTES = 15;
 
 /**
  * Hủy các đơn chuyển khoản chưa thanh toán quá hạn và hoàn kho.
@@ -49,6 +50,15 @@ export async function cancelExpiredBankOrders(): Promise<number> {
           await tx.product.update({
             where: { id: item.productId },
             data: { stock: { increment: item.quantity } },
+          });
+
+          // STOCK: ghi lịch sử hoàn kho, cùng transaction
+          await logStockMovement(tx, {
+            productId: item.productId,
+            change: item.quantity,
+            reason: "cancel_restore",
+            orderId: id,
+            note: "Đơn chuyển khoản quá hạn, tự hủy",
           });
         }
 

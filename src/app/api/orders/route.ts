@@ -5,6 +5,7 @@ import { createOrderSchema } from "../../../../lib/validation/order";
 import { cancelExpiredBankOrders } from "../../../../lib/expire-orders";
 import { calcOrderTotals, toVoucherRule } from "../../../../lib/shipping"; // VOUCHER
 import { resolveOrderVouchers } from "../../../../lib/vouchers"; // VOUCHER
+import { logStockMovement } from "../../../../lib/stock"; // STOCK
 
 // Lỗi nghiệp vụ có status HTTP riêng (khác lỗi hệ thống 500)
 class OrderError extends Error {
@@ -119,7 +120,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      return tx.order.create({
+      const created = await tx.order.create({
         data: {
           customerId: payload.id,
           customerName: input.customerName,
@@ -145,6 +146,18 @@ export async function POST(request: NextRequest) {
           orderItems: { include: { product: true } },
         },
       });
+
+      // STOCK: ghi lịch sử bán ra, cùng transaction với việc trừ kho
+      for (const item of input.items) {
+        await logStockMovement(tx, {
+          productId: item.productId,
+          change: -item.quantity,
+          reason: "sale",
+          orderId: created.id,
+        });
+      }
+
+      return created;
     });
 
     return NextResponse.json({ success: true, data: order }, { status: 201 });

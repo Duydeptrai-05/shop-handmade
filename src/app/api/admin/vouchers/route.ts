@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../../lib/prisma";
 import { getAuthPayload } from "../../../../../lib/auth";
 import { createVoucherSchema } from "../../../../../lib/validation/voucher";
+import { logAudit } from "../../../../../lib/audit"; // AUDIT
 
 // Đơn đã hủy không tính vào số lượt đã dùng
 const activeOrderFilter = { where: { status: { not: "cancelled" as const } } };
@@ -68,6 +69,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // AUDIT: lấy Admin đang thao tác để ghi nhật ký
+    const admin = await prisma.admin.findUnique({
+      where: { id: payload.id },
+      select: { id: true, username: true },
+    });
+    if (!admin) {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
+
     const body = await request.json().catch(() => null);
     const parsed = createVoucherSchema.safeParse(body);
     if (!parsed.success) {
@@ -93,22 +106,44 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const voucher = await prisma.voucher.create({
-      data: {
-        code: data.code,
-        description: data.description || null,
-        type: data.type,
-        discountKind: data.discountKind,
-        value: data.value,
-        // Mức giảm tối đa chỉ có ý nghĩa khi giảm theo %
-        maxDiscount:
-          data.discountKind === "percent" ? (data.maxDiscount ?? null) : null,
-        minOrderValue: data.minOrderValue ?? 0,
-        startsAt: data.startsAt ? new Date(data.startsAt) : null,
-        expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
-        usageLimit: data.usageLimit ?? null,
-        isActive: data.isActive ?? true,
-      },
+    const voucher = await prisma.$transaction(async (tx) => {
+      const created = await tx.voucher.create({
+        data: {
+          code: data.code,
+          description: data.description || null,
+          type: data.type,
+          discountKind: data.discountKind,
+          value: data.value,
+          // Mức giảm tối đa chỉ có ý nghĩa khi giảm theo %
+          maxDiscount:
+            data.discountKind === "percent" ? (data.maxDiscount ?? null) : null,
+          minOrderValue: data.minOrderValue ?? 0,
+          startsAt: data.startsAt ? new Date(data.startsAt) : null,
+          expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
+          usageLimit: data.usageLimit ?? null,
+          isActive: data.isActive ?? true,
+        },
+      });
+
+      // AUDIT: ghi nhật ký tạo voucher
+      const loai =
+        data.type === "discount" ? "giảm tiền hàng" : "giảm phí ship";
+      const giaTri =
+        data.discountKind === "percent"
+          ? `${data.value}%`
+          : `${Number(data.value).toLocaleString("vi-VN")}đ`;
+      await logAudit(
+        tx,
+        { id: admin.id, username: admin.username },
+        {
+          action: "voucher.create",
+          entityType: "voucher",
+          entityId: created.id,
+          summary: `Tạo voucher ${created.code} (${loai}, ${giaTri})`,
+        },
+      );
+
+      return created;
     });
 
     return NextResponse.json(

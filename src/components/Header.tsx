@@ -55,16 +55,25 @@ export default async function Header() {
                 Tổng quan
               </Link>
               <Link href="/admin/orders" className={linkClass}>
-                Quản lý đơn hàng
+                Đơn hàng
               </Link>
               <Link href="/admin/products" className={linkClass}>
-                Quản lý sản phẩm
+                Sản phẩm
+              </Link>
+              <Link href="/admin/stock" className={linkClass}>
+                Kho
               </Link>
               <Link href="/admin/customers" className={linkClass}>
                 Khách hàng
               </Link>
               <Link href="/admin/vouchers" className={linkClass}>
                 Voucher
+              </Link>
+              <Link href="/admin/reviews" className={linkClass}>
+                Đánh giá
+              </Link>
+              <Link href="/admin/audit" className={linkClass}>
+                Nhật ký
               </Link>
               <LogoutButton redirectTo="/admin/login" className={linkClass} />
             </>

@@ -16,3 +16,8 @@ export const createReviewSchema = z.object({
 });
 
 export type CreateReviewInput = z.infer<typeof createReviewSchema>;
+
+// Admin đổi trạng thái đánh giá: chỉ duyệt hoặc ẩn (không đưa về chờ duyệt)
+export const updateReviewStatusSchema = z.object({
+  status: z.enum(["approved", "hidden"]),
+});

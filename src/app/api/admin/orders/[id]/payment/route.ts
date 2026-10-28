@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../../../../lib/prisma";
 import { getAuthPayload } from "../../../../../../../lib/auth";
 import { cancelExpiredBankOrders } from "../../../../../../../lib/expire-orders"; // MỚI
+import { logAudit } from "../../../../../../../lib/audit";
 
 class PaymentError extends Error {
   status: number;
@@ -25,7 +26,17 @@ export async function PATCH(
         { status: 401 },
       );
     }
-
+    // Lấy username Admin để ghi nhật ký (giống file orders/[id]/route.ts)
+    const admin = await prisma.admin.findUnique({
+      where: { id: payload.id },
+      select: { username: true },
+    });
+    if (!admin) {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
     // 2. Kiểm tra id trên URL
     const { id } = await params;
     const orderId = Number(id);
@@ -72,6 +83,17 @@ export async function PATCH(
           409,
         );
       }
+
+      await logAudit(
+        tx,
+        { id: payload.id, username: admin.username },
+        {
+          action: "order.payment",
+          entityType: "order",
+          entityId: orderId,
+          summary: `Xác nhận đã nhận tiền chuyển khoản đơn #${orderId}`,
+        },
+      );
 
       return tx.order.findUnique({
         where: { id: orderId },

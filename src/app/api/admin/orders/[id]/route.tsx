@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "../../../../../../lib/prisma";
 import { getAuthPayload } from "../../../../../../lib/auth";
+import { logStockMovement } from "../../../../../../lib/stock"; // STOCK
+import { logAudit } from "../../../../../../lib/audit"; // AUDIT
 
 const updateStatusSchema = z.object({
   status: z.enum(["pending", "confirmed", "shipped", "completed", "cancelled"]),
@@ -15,6 +17,15 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   shipped: ["completed"],
   completed: [],
   cancelled: [],
+};
+
+// AUDIT: nhãn tiếng Việt để câu mô tả trong nhật ký dễ đọc
+const STATUS_LABEL: Record<string, string> = {
+  pending: "Chờ xác nhận",
+  confirmed: "Đã xác nhận",
+  shipped: "Đang giao",
+  completed: "Hoàn thành",
+  cancelled: "Đã hủy",
 };
 
 class AdminOrderError extends Error {
@@ -33,6 +44,18 @@ export async function PATCH(
     // 1. Chỉ Admin được đổi trạng thái
     const payload = await getAuthPayload();
     if (!payload || payload.role !== "admin") {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
+
+    // AUDIT: lấy username Admin để ghi nhật ký
+    const admin = await prisma.admin.findUnique({
+      where: { id: payload.id },
+      select: { id: true, username: true },
+    });
+    if (!admin) {
       return NextResponse.json(
         { success: false, message: "Bạn không có quyền truy cập" },
         { status: 401 },
@@ -106,8 +129,25 @@ export async function PATCH(
             where: { id: item.productId },
             data: { stock: { increment: item.quantity } },
           });
+
+          // STOCK: ghi lịch sử hoàn kho, cùng transaction
+          await logStockMovement(tx, {
+            productId: item.productId,
+            change: item.quantity,
+            reason: "cancel_restore",
+            orderId,
+            note: "Admin hủy đơn",
+          });
         }
       }
+
+      // AUDIT: ghi nhật ký cùng transaction, đổi trạng thái thành công thì mới có log
+      await logAudit(tx, admin, {
+        action: newStatus === "cancelled" ? "order.cancel" : "order.status",
+        entityType: "order",
+        entityId: orderId,
+        summary: `Đổi đơn #${orderId} từ "${STATUS_LABEL[order.status]}" sang "${STATUS_LABEL[newStatus]}"`,
+      });
 
       return tx.order.findUnique({
         where: { id: orderId },

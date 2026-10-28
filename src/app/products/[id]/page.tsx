@@ -24,6 +24,7 @@ export default async function ProductDetailPage({
       include: {
         category: true,
         reviews: {
+          where: { status: "approved" },
           include: {
             customer: { select: { name: true } },
           },

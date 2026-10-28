@@ -737,6 +737,14 @@ export default function AdminOrdersPage() {
                           )
                         )}
 
+                        <Link
+                          href={`/admin/orders/${order.id}/invoice`}
+                          target="_blank"
+                          className="rounded-full border border-ink/20 px-5 py-2 text-sm font-medium transition hover:bg-ink hover:text-paper"
+                        >
+                          🖨 In hóa đơn
+                        </Link>
+
                         {unpaid && (
                           <motion.button
                             type="button"

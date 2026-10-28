@@ -52,7 +52,7 @@ export async function GET(_request: Request, { params }: Context) {
       hasPurchased(customerId, productId),
       prisma.review.findUnique({
         where: { productId_customerId: { productId, customerId } },
-        select: { id: true },
+        select: { id: true, status: true },
       }),
     ]);
 
@@ -62,6 +62,7 @@ export async function GET(_request: Request, { params }: Context) {
         loggedIn: true,
         canReview: purchased && !existing,
         hasReviewed: existing !== null,
+        reviewStatus: existing?.status ?? null,
       },
     });
   } catch (error) {
@@ -139,6 +140,7 @@ export async function POST(request: Request, { params }: Context) {
           customerId,
           rating: parsed.data.rating,
           comment: parsed.data.comment ?? null,
+          status: "pending",
         },
       });
       return NextResponse.json(

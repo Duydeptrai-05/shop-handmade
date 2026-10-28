@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "../../../../../../lib/prisma";
 import { getAuthPayload } from "../../../../../../lib/auth";
+import { logAudit } from "../../../../../../lib/audit"; // AUDIT
 
 const actionSchema = z.object({
   action: z.enum(["lock", "unlock", "reset_password"], {
@@ -37,7 +38,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    if (!(await requireAdmin())) {
+    const payload = await requireAdmin();
+    if (!payload) {
       return NextResponse.json(
         { success: false, message: "Bạn cần đăng nhập bằng tài khoản Admin" },
         { status: 401 },
@@ -143,7 +145,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    if (!(await requireAdmin())) {
+    const payload = await requireAdmin();
+    if (!payload) {
       return NextResponse.json(
         { success: false, message: "Bạn cần đăng nhập bằng tài khoản Admin" },
         { status: 401 },
@@ -169,12 +172,24 @@ export async function PATCH(
 
     const customer = await prisma.customer.findUnique({
       where: { id },
-      select: { id: true, isActive: true },
+      select: { id: true, isActive: true, name: true },
     });
     if (!customer) {
       return NextResponse.json(
         { success: false, message: "Không tìm thấy khách hàng" },
         { status: 404 },
+      );
+    }
+
+    // AUDIT: lấy Admin đang thao tác để ghi nhật ký
+    const admin = await prisma.admin.findUnique({
+      where: { id: payload.id },
+      select: { id: true, username: true },
+    });
+    if (!admin) {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập bằng tài khoản Admin" },
+        { status: 401 },
       );
     }
 
@@ -193,9 +208,21 @@ export async function PATCH(
           { status: 409 },
         );
       }
-      await prisma.customer.update({
-        where: { id },
-        data: { isActive: wantActive },
+      await prisma.$transaction(async (tx) => {
+        await tx.customer.update({
+          where: { id },
+          data: { isActive: wantActive },
+        });
+        await logAudit(
+          tx,
+          { id: admin.id, username: admin.username },
+          {
+            action: wantActive ? "customer.unlock" : "customer.lock",
+            entityType: "customer",
+            entityId: id,
+            summary: `${wantActive ? "Mở khóa" : "Khóa"} tài khoản khách "${customer.name}" (#${id})`,
+          },
+        );
       });
       return NextResponse.json({
         success: true,
@@ -206,9 +233,22 @@ export async function PATCH(
     // reset_password: sinh mật khẩu tạm, chỉ trả về một lần
     const tempPassword = generateTempPassword();
     const passwordHash = await bcrypt.hash(tempPassword, 10);
-    await prisma.customer.update({
-      where: { id },
-      data: { passwordHash },
+    await prisma.$transaction(async (tx) => {
+      await tx.customer.update({
+        where: { id },
+        data: { passwordHash },
+      });
+      // Không ghi mật khẩu tạm vào nhật ký
+      await logAudit(
+        tx,
+        { id: admin.id, username: admin.username },
+        {
+          action: "customer.reset_password",
+          entityType: "customer",
+          entityId: id,
+          summary: `Đặt lại mật khẩu cho khách "${customer.name}" (#${id})`,
+        },
+      );
     });
     return NextResponse.json({
       success: true,

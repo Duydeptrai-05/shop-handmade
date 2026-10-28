@@ -38,13 +38,16 @@ model Product {
   isActive    Boolean  @default(true) @map("is_active") // soft delete
   categoryId  Int      @map("category_id")
 
-  category   Category    @relation(fields: [categoryId], references: [id])
-  orderItems OrderItem[]
-  reviews    Review[]
+    category       Category        @relation(fields: [categoryId], references: [id])
+  orderItems     OrderItem[]
+  reviews        Review[]
+  stockMovements StockMovement[]
 
   @@index([categoryId])
   @@map("products")
 }
+
+
 
 // ------------------------------------------------------------
 // Customer
@@ -165,7 +168,8 @@ model Order {
   customer        Customer    @relation(fields: [customerId], references: [id])
   discountVoucher Voucher?    @relation("OrderDiscountVoucher", fields: [discountVoucherId], references: [id])
   shippingVoucher Voucher?    @relation("OrderShippingVoucher", fields: [shippingVoucherId], references: [id])
-  orderItems      OrderItem[]
+   orderItems      OrderItem[]
+  stockMovements  StockMovement[]
 
   @@index([customerId])
   @@index([discountVoucherId])
@@ -197,18 +201,27 @@ model OrderItem {
 // status = completed — điều kiện này check ở tầng API,
 // UNIQUE(productId, customerId) chặn trùng ở tầng DB.
 // ------------------------------------------------------------
+
+enum ReviewStatus {
+  pending
+  approved
+  hidden
+}
+
 model Review {
   id         Int      @id @default(autoincrement())
   productId  Int      @map("product_id")
   customerId Int      @map("customer_id")
   rating     Int      // 1-5, validate ở tầng API/zod
   comment    String?  @db.Text
+  status     ReviewStatus @default(approved)
   createdAt  DateTime @default(now()) @map("created_at")
 
   product  Product  @relation(fields: [productId], references: [id])
   customer Customer @relation(fields: [customerId], references: [id])
 
   @@unique([productId, customerId]) // 1 khách chỉ review 1 sản phẩm đúng 1 lần
+  @@index([status])
   @@map("reviews")
 }
 
@@ -221,6 +234,8 @@ model Admin {
   id           Int    @id @default(autoincrement())
   username     String @unique @db.VarChar(100)
   passwordHash String @map("password_hash") @db.VarChar(255)
+
+  auditLogs AuditLog[]
 
   @@map("admins")
 }
@@ -238,4 +253,60 @@ model PasswordResetToken {
 
   @@index([customerId])
   @@map("password_reset_tokens")
+}
+
+// ------------------------------------------------------------
+// StockMovement (lịch sử biến động tồn kho)
+// change > 0: kho tăng (nhập hàng, hoàn kho), change < 0: kho giảm (bán ra)
+// stockAfter = tồn kho của sản phẩm ngay sau lần thay đổi này
+// orderId chỉ có khi lý do là sale hoặc cancel_restore
+// ------------------------------------------------------------
+enum StockMovementReason {
+  import
+  sale
+  cancel_restore
+  adjustment
+}
+
+model StockMovement {
+  id         Int                 @id @default(autoincrement())
+  productId  Int                 @map("product_id")
+  orderId    Int?                @map("order_id")
+  change     Int
+  stockAfter Int                 @map("stock_after")
+  reason     StockMovementReason
+  note       String?             @db.VarChar(255)
+  createdAt  DateTime            @default(now()) @map("created_at")
+
+  product Product @relation(fields: [productId], references: [id])
+  order   Order?  @relation(fields: [orderId], references: [id])
+
+  @@index([productId, createdAt])
+  @@index([orderId])
+  @@map("stock_movements")
+}
+
+// ------------------------------------------------------------
+// AuditLog (nhật ký thao tác của Admin)
+// action: mã hành động, ví dụ order.cancel, product.update, review.hide,
+//         customer.lock, voucher.create...
+// entityType + entityId: đối tượng bị tác động (order, product, customer, voucher, review)
+// adminUsername lưu bản sao tên đăng nhập tại lúc thao tác
+// summary: mô tả ngắn bằng tiếng Việt để hiển thị thẳng trên trang nhật ký
+// ------------------------------------------------------------
+model AuditLog {
+  id            Int      @id @default(autoincrement())
+  adminId       Int      @map("admin_id")
+  adminUsername String   @map("admin_username") @db.VarChar(100)
+  action        String   @db.VarChar(50)
+  entityType    String   @map("entity_type") @db.VarChar(30)
+  entityId      Int?     @map("entity_id")
+  summary       String   @db.VarChar(500)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  admin Admin @relation(fields: [adminId], references: [id])
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
 }
