@@ -71,6 +71,8 @@ export default function AdminProductsPage() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
 
   function goLogin() {
     window.location.href = "/admin/login?next=/admin/products";
@@ -114,6 +116,7 @@ export default function AdminProductsPage() {
     setEditing(null);
     setForm(emptyForm);
     setFormError("");
+    setUploadError("");
     setShowForm(true);
   }
 
@@ -204,6 +207,37 @@ export default function AdminProductsPage() {
 
   function setField(name: keyof FormState, value: string) {
     setForm((prev) => ({ ...prev, [name]: value }));
+  }
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // cho phép chọn lại đúng file vừa chọn
+    if (!file) return;
+
+    setUploadError("");
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/admin/upload", {
+        method: "POST",
+        body: fd,
+      });
+      if (res.status === 401) {
+        goLogin();
+        return;
+      }
+      const json = await res.json();
+      if (!json.success) {
+        setUploadError(json.message);
+        return;
+      }
+      setField("imageUrl", json.data.url);
+    } catch {
+      setUploadError("Không thể kết nối máy chủ");
+    } finally {
+      setUploading(false);
+    }
   }
 
   const inputClass =
@@ -366,7 +400,7 @@ export default function AdminProductsPage() {
             />
           </label>
 
-          <label>
+          <label className="sm:col-span-2">
             <span className="mb-1 block text-sm text-ink">Danh mục</span>
             <select
               value={form.categoryId}
@@ -382,15 +416,59 @@ export default function AdminProductsPage() {
             </select>
           </label>
 
-          <label>
-            <span className="mb-1 block text-sm text-ink">Đường dẫn ảnh</span>
-            <input
-              value={form.imageUrl}
-              onChange={(e) => setField("imageUrl", e.target.value)}
-              placeholder="https://... hoặc /images/..."
-              className={inputClass}
-            />
-          </label>
+          <div className="sm:col-span-2">
+            <span className="mb-1 block text-sm text-ink">Ảnh sản phẩm</span>
+            <div className="flex flex-wrap items-center gap-3">
+              {form.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={form.imageUrl}
+                  alt="Xem trước"
+                  className="h-24 w-24 rounded-xl border border-ink/10 object-cover"
+                />
+              ) : (
+                <span className="flex h-24 w-24 items-center justify-center rounded-xl bg-ink/5 text-xs text-ink/40">
+                  Chưa có ảnh
+                </span>
+              )}
+
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="cursor-pointer rounded-lg border border-ink/20 px-4 py-2 text-sm font-medium text-ink transition hover:bg-ink hover:text-paper">
+                    {uploading ? "Đang tải ảnh..." : "Chọn ảnh từ máy"}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={handleFile}
+                      disabled={uploading}
+                      className="hidden"
+                    />
+                  </label>
+                  {form.imageUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setField("imageUrl", "")}
+                      className="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-700 transition hover:bg-red-600 hover:text-white"
+                    >
+                      Bỏ ảnh
+                    </button>
+                  )}
+                </div>
+                <input
+                  value={form.imageUrl}
+                  onChange={(e) => setField("imageUrl", e.target.value)}
+                  placeholder="Hoặc dán đường dẫn: https://... hoặc /images/..."
+                  className={inputClass}
+                />
+                {uploadError && (
+                  <p className="text-sm text-red-700">{uploadError}</p>
+                )}
+                <span className="text-xs text-ink/50">
+                  JPG, PNG hoặc WEBP, tối đa 2MB
+                </span>
+              </div>
+            </div>
+          </div>
 
           <label className="sm:col-span-2">
             <span className="mb-1 block text-sm text-ink">Mô tả</span>

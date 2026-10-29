@@ -60,6 +60,8 @@ model Customer {
   phone        String? @db.VarChar(20)
   passwordHash String  @map("password_hash") @db.VarChar(255) // bcryptjs
   isActive     Boolean @default(true) @map("is_active") // false = Admin đã khóa tài khoản
+  failedLoginCount Int       @default(0) @map("failed_login_count")
+  lockedUntil      DateTime? @map("locked_until")
 
   orders    Order[]
   reviews   Review[]
@@ -236,6 +238,8 @@ model Admin {
   id           Int    @id @default(autoincrement())
   username     String @unique @db.VarChar(100)
   passwordHash String @map("password_hash") @db.VarChar(255)
+    failedLoginCount Int       @default(0) @map("failed_login_count")
+  lockedUntil      DateTime? @map("locked_until")
 
   auditLogs AuditLog[]
 

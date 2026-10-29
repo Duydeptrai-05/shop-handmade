@@ -3,6 +3,12 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../../../../../lib/prisma";
 import { loginSchema } from "../../../../../lib/validation/auth";
 import { signToken, setAuthCookie } from "../../../../../lib/auth";
+import {
+  lockMinutesLeft,
+  lockedMessage,
+  registerFailedLogin,
+  clearFailedLogin,
+} from "../../../../../lib/login-limit";
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,6 +32,8 @@ export async function POST(request: NextRequest) {
         email: true,
         passwordHash: true,
         isActive: true,
+        failedLoginCount: true,
+        lockedUntil: true,
       },
     });
 
@@ -36,14 +44,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Đang bị khóa tạm do nhập sai nhiều lần: chặn luôn, không so mật khẩu
+    const minutesLeft = lockMinutesLeft(customer.lockedUntil);
+    if (minutesLeft > 0) {
+      return NextResponse.json(
+        { success: false, message: lockedMessage(minutesLeft) },
+        { status: 429 },
+      );
+    }
+
     const isValidPassword = await bcrypt.compare(
       password,
       customer.passwordHash,
     );
 
     if (!isValidPassword) {
+      const result = await registerFailedLogin(prisma, "customer", customer.id);
+
+      if (result.locked) {
+        return NextResponse.json(
+          { success: false, message: lockedMessage(result.minutes) },
+          { status: 429 },
+        );
+      }
+
       return NextResponse.json(
-        { success: false, message: "Email hoặc mật khẩu không đúng" },
+        {
+          success: false,
+          message: `Email hoặc mật khẩu không đúng. Bạn còn ${result.remaining} lần thử.`,
+        },
         { status: 401 },
       );
     }
@@ -59,6 +88,11 @@ export async function POST(request: NextRequest) {
         },
         { status: 403 },
       );
+    }
+
+    // Đăng nhập đúng: xóa bộ đếm sai (chỉ ghi DB khi thật sự có gì để xóa)
+    if (customer.failedLoginCount > 0 || customer.lockedUntil) {
+      await clearFailedLogin(prisma, "customer", customer.id);
     }
 
     const token = signToken({ id: customer.id, role: "customer" });
