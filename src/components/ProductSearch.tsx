@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 type ProductSearchProps = {
   initialKeyword: string;
@@ -10,11 +10,9 @@ type ProductSearchProps = {
 
 const DEBOUNCE_MS = 300;
 
-export default function ProductSearch({
-  initialKeyword,
-  categoryId,
-}: ProductSearchProps) {
+export default function ProductSearch({ initialKeyword }: ProductSearchProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [value, setValue] = useState(initialKeyword);
 
   // Từ khóa gần nhất đã đẩy lên URL (hoặc đến từ URL). Dùng để tránh
@@ -30,22 +28,24 @@ export default function ProductSearch({
     }
   }, [initialKeyword]);
 
-  // Gõ xong khoảng 0,3 giây thì tự cập nhật URL, giữ danh mục đang chọn.
+  // Gõ xong khoảng 0,3 giây thì tự cập nhật URL: giữ nguyên category, sort,
+  // min, max đang có; chỉ thay q và đưa về trang 1.
   useEffect(() => {
     const trimmed = value.trim();
     if (trimmed === lastPushed.current) return;
 
     const timer = setTimeout(() => {
       lastPushed.current = trimmed;
-      const params = new URLSearchParams();
-      if (categoryId) params.set("category", String(categoryId));
+      const params = new URLSearchParams(searchParams.toString());
       if (trimmed) params.set("q", trimmed);
+      else params.delete("q");
+      params.delete("page");
       const qs = params.toString();
       router.replace(qs ? `/products?${qs}` : "/products", { scroll: false });
     }, DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [value, categoryId, router]);
+  }, [value, searchParams, router]);
 
   return (
     <form

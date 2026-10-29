@@ -83,6 +83,9 @@ export default async function Header() {
                 Trang chủ
               </Link>
               <CategoryMenu categories={categories} />
+              <Link href="/wishlist" className={linkClass}>
+                Yêu thích
+              </Link>
               <CartLink className={linkClass} />
               <OrdersLink className={linkClass} />
               <Link href="/account" className={linkClass}>

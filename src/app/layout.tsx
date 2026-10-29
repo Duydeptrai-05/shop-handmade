@@ -4,6 +4,7 @@ import "./globals.css";
 import { CartProvider } from "../../lib/cart-context";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
+import { WishlistProvider } from "../../lib/wishlist-context";
 
 const fraunces = Fraunces({
   subsets: ["latin", "vietnamese"],
@@ -33,9 +34,11 @@ export default function RootLayout({
         className={`${fraunces.variable} ${beVietnamPro.variable} font-body flex min-h-screen flex-col bg-paper text-ink`}
       >
         <CartProvider>
-          <Header />
-          <div className="flex-1">{children}</div>
-          <Footer />
+          <WishlistProvider>
+            <Header />
+            <div className="flex-1">{children}</div>
+            <Footer />
+          </WishlistProvider>
         </CartProvider>
       </body>
     </html>

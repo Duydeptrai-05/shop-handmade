@@ -7,6 +7,8 @@ import { notFound } from "next/navigation";
 import AddToCartButton from "../../../components/AddToCartButton";
 import ReviewForm from "../../../components/ReviewForm";
 import { getAlsoBought } from "../../../../lib/recommendations";
+import RecentlyViewed from "../../../components/RecentlyViewed";
+import WishlistButton from "../../../components/WishlistButton";
 
 // Từ ngưỡng này trở xuống thì báo "Chỉ còn ..." để khách biết món sắp hết
 const LOW_STOCK = 5;
@@ -149,6 +151,10 @@ export default async function ProductDetailPage({
             stock={product.stock}
             isLoggedIn={customer !== null}
           />
+
+          <div className="mt-3">
+            <WishlistButton productId={product.id} variant="full" />
+          </div>
         </div>
       </div>
 
@@ -255,6 +261,16 @@ export default async function ProductDetailPage({
           </ul>
         </section>
       )}
+
+      {/* Bạn vừa xem: ghi lại món này và hiện các món đã xem trước đó */}
+      <RecentlyViewed
+        current={{
+          id: product.id,
+          name: product.name,
+          price: Number(product.price),
+          imageUrl: product.imageUrl,
+        }}
+      />
     </main>
   );
 }

@@ -4,6 +4,7 @@ import { getCurrentCustomer } from "../../lib/auth";
 import { getRecommendationsForCustomer } from "../../lib/recommendations";
 import Reveal from "../components/Reveal";
 import Link from "next/link";
+import RecentlyViewed from "../components/RecentlyViewed";
 
 const MARQUEE_ITEMS = [
   "Làm thủ công",
@@ -267,6 +268,9 @@ export default async function HomePage() {
           <ProductCarousel products={carouselProducts} />
         </section>
       )}
+
+      {/* Bạn vừa xem: lấy từ localStorage, chưa xem món nào thì không hiện */}
+      <RecentlyViewed />
     </main>
   );
 }

@@ -42,6 +42,7 @@ model Product {
   orderItems     OrderItem[]
   reviews        Review[]
   stockMovements StockMovement[]
+    wishlistedBy   Wishlist[]
 
   @@index([categoryId])
   @@map("products")
@@ -64,6 +65,7 @@ model Customer {
   reviews   Review[]
   addresses Address[]
   resetTokens PasswordResetToken[]
+    wishlist    Wishlist[]
 
   @@map("customers")
 }
@@ -309,4 +311,23 @@ model AuditLog {
   @@index([createdAt])
   @@index([entityType, entityId])
   @@map("audit_logs")
+}
+
+// ------------------------------------------------------------
+// Wishlist (sản phẩm yêu thích của khách)
+// Mỗi khách chỉ thích 1 sản phẩm đúng 1 lần (UNIQUE customerId + productId)
+// Xóa khách thì xóa luôn danh sách yêu thích của khách đó
+// ------------------------------------------------------------
+model Wishlist {
+  id         Int      @id @default(autoincrement())
+  customerId Int      @map("customer_id")
+  productId  Int      @map("product_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, productId])
+  @@index([productId])
+  @@map("wishlists")
 }
