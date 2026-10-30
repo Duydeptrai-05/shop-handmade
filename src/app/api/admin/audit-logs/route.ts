@@ -6,7 +6,7 @@ const PAGE_SIZE_DEFAULT = 30;
 const PAGE_SIZE_MAX = 100;
 
 // GET: Admin xem nhật ký thao tác
-// ?entityType=order|product|customer|voucher|review  ?q=từ khóa trong nội dung
+// ?entityType=order|product|customer|voucher|review|custom_request  ?q=từ khóa trong nội dung
 // ?page=1  ?pageSize=30
 export async function GET(request: Request) {
   try {

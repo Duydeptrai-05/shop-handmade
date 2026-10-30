@@ -19,6 +19,7 @@ const CHANNELS = [
   { key: "customer", label: "khách-hàng" },
   { key: "voucher", label: "voucher" },
   { key: "review", label: "đánh-giá" },
+  { key: "custom_request", label: "đặt-làm" },
 ];
 
 type Tone = "ok" | "bad" | "info";
@@ -39,6 +40,10 @@ const ACTION_META: Record<string, { label: string; tone: Tone }> = {
   "voucher.delete": { label: "XÓA VOUCHER", tone: "bad" },
   "review.approve": { label: "DUYỆT", tone: "ok" },
   "review.hide": { label: "ẨN ĐÁNH GIÁ", tone: "bad" },
+  "custom_request.quote": { label: "BÁO GIÁ", tone: "info" },
+  "custom_request.reject": { label: "TỪ CHỐI YÊU CẦU", tone: "bad" },
+  "custom_request.start": { label: "BẮT ĐẦU LÀM", tone: "info" },
+  "custom_request.complete": { label: "HOÀN THÀNH", tone: "ok" },
 };
 
 const TONE_CLASS: Record<Tone, string> = {

@@ -57,6 +57,9 @@ export default async function Header() {
               <Link href="/admin/orders" className={linkClass}>
                 Đơn hàng
               </Link>
+              <Link href="/admin/custom-requests" className={linkClass}>
+                Đặt làm
+              </Link>
               <Link href="/admin/products" className={linkClass}>
                 Sản phẩm
               </Link>
@@ -83,6 +86,9 @@ export default async function Header() {
                 Trang chủ
               </Link>
               <CategoryMenu categories={categories} />
+              <Link href="/custom" className={linkClass}>
+                Đặt làm
+              </Link>
               <Link href="/wishlist" className={linkClass}>
                 Yêu thích
               </Link>
