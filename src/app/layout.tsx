@@ -5,6 +5,7 @@ import { CartProvider } from "../../lib/cart-context";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { WishlistProvider } from "../../lib/wishlist-context";
+import SocialFloat from "../components/SocialFloat";
 
 const fraunces = Fraunces({
   subsets: ["latin", "vietnamese"],
@@ -38,6 +39,7 @@ export default function RootLayout({
             <Header />
             <div className="flex-1">{children}</div>
             <Footer />
+            <SocialFloat />
           </WishlistProvider>
         </CartProvider>
       </body>

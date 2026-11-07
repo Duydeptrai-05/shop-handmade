@@ -41,6 +41,46 @@ type SavedAddress = {
   isDefault: boolean;
 };
 
+// VOUCHER KHÁCH: voucher đang dùng được, lấy từ /api/vouchers
+type VoucherItem = {
+  id: number;
+  code: string;
+  description: string | null;
+  type: "discount" | "shipping";
+  discountKind: "percent" | "fixed";
+  value: number;
+  maxDiscount: number | null;
+  minOrderValue: number;
+  expiresAt: string | null;
+  remaining: number | null;
+  soldOut: boolean;
+  usedByMe: boolean;
+};
+
+// Chữ lớn trên "cuống vé"
+function voucherBadge(v: VoucherItem) {
+  if (v.discountKind === "percent") {
+    return v.type === "shipping" && v.value >= 100 ? "FREESHIP" : `${v.value}%`;
+  }
+  return v.value % 1000 === 0 ? `${v.value / 1000}K` : formatVND(v.value);
+}
+
+// Dòng điều kiện nhỏ phía dưới
+function voucherNotes(v: VoucherItem) {
+  const parts: string[] = [];
+  if (v.minOrderValue > 0) parts.push(`Đơn từ ${formatVND(v.minOrderValue)}`);
+  if (v.discountKind === "percent" && v.maxDiscount !== null) {
+    parts.push(`Giảm tối đa ${formatVND(v.maxDiscount)}`);
+  }
+  if (v.expiresAt) {
+    parts.push(`HSD ${new Date(v.expiresAt).toLocaleDateString("vi-VN")}`);
+  }
+  if (v.remaining !== null && v.remaining <= 10 && !v.soldOut) {
+    parts.push(`Còn ${v.remaining} lượt`);
+  }
+  return parts.join(" · ");
+}
+
 // Thông tin tài khoản nhận tiền, đọc từ .env (NEXT_PUBLIC_ để dùng được ở client)
 const BANK = {
   id: process.env.NEXT_PUBLIC_BANK_ID ?? "",
@@ -403,6 +443,116 @@ function AddressPicker({
   );
 }
 
+// VOUCHER KHÁCH: danh sách vé voucher, bấm một vé để điền mã vào đúng ô, bấm lần nữa để bỏ
+function VoucherTickets({
+  list,
+  subtotal,
+  discountCode,
+  shippingCode,
+  onPick,
+}: {
+  list: VoucherItem[];
+  subtotal: number;
+  discountCode: string;
+  shippingCode: string;
+  onPick: (v: VoucherItem) => void;
+}) {
+  if (list.length === 0) return null;
+
+  return (
+    <div className="mb-6 space-y-5">
+      <p className="text-xs font-semibold uppercase tracking-wider text-moss-dark">
+        Voucher đang có cho bạn
+      </p>
+
+      {(["discount", "shipping"] as const).map((slot) => {
+        const group = list.filter((v) => v.type === slot);
+        if (group.length === 0) return null;
+        const current = (slot === "discount" ? discountCode : shippingCode)
+          .trim()
+          .toUpperCase();
+
+        return (
+          <div key={slot}>
+            <p className="mb-2 text-sm font-medium text-ink/70">
+              {slot === "discount" ? "Giảm tiền hàng" : "Giảm phí ship"}
+            </p>
+            <div className="space-y-2.5">
+              {group.map((v) => {
+                const reason = v.usedByMe
+                  ? "Bạn đã dùng mã này"
+                  : v.soldOut
+                    ? "Đã hết lượt sử dụng"
+                    : subtotal < v.minOrderValue
+                      ? `Mua thêm ${formatVND(v.minOrderValue - subtotal)} để dùng`
+                      : null;
+                const selected = current === v.code;
+                const notes = voucherNotes(v);
+
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    disabled={!!reason}
+                    onClick={() => onPick(v)}
+                    aria-pressed={selected}
+                    className={`flex w-full overflow-hidden rounded-xl border-2 bg-white text-left transition ${
+                      selected
+                        ? "border-moss"
+                        : "border-ink/10 hover:border-peach"
+                    } ${reason ? "cursor-not-allowed opacity-55" : ""}`}
+                  >
+                    <span
+                      className={`flex w-24 shrink-0 flex-col items-center justify-center border-r-2 border-dashed border-paper px-2 py-3 text-center text-white ${
+                        reason ? "bg-ink/30" : "bg-moss"
+                      }`}
+                    >
+                      <span className="font-heading text-xl font-semibold leading-tight">
+                        {voucherBadge(v)}
+                      </span>
+                      <span className="mt-0.5 text-[10px] uppercase tracking-wider opacity-80">
+                        {slot === "shipping" ? "phí ship" : "tiền hàng"}
+                      </span>
+                    </span>
+
+                    <span className="min-w-0 flex-1 px-4 py-3">
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-sm font-semibold tracking-wider">
+                          {v.code}
+                        </span>
+                        {selected && (
+                          <span className="rounded-full bg-moss px-2 py-0.5 text-[10px] font-semibold text-white">
+                            Đã chọn
+                          </span>
+                        )}
+                      </span>
+                      {v.description && (
+                        <span className="mt-0.5 block text-sm text-ink/70">
+                          {v.description}
+                        </span>
+                      )}
+                      {notes && (
+                        <span className="mt-1 block text-xs text-ink/50">
+                          {notes}
+                        </span>
+                      )}
+                      {reason && (
+                        <span className="mt-1 block text-xs font-medium text-red-700">
+                          {reason}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function CheckoutPage() {
   const { items, clearCart, totalItems, totalPrice } = useCart();
 
@@ -415,6 +565,7 @@ export default function CheckoutPage() {
   const [shippingCode, setShippingCode] = useState(""); // VOUCHER
   const [preview, setPreview] = useState<Preview | null>(null); // VOUCHER
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
+  const [vouchers, setVouchers] = useState<VoucherItem[]>([]); // VOUCHER KHÁCH
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [needLogin, setNeedLogin] = useState(false);
@@ -452,6 +603,32 @@ export default function CheckoutPage() {
     })();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  // VOUCHER KHÁCH: tải danh sách voucher; tải lại khi khách quay lại tab,
+  // nên Admin vừa tạo voucher mới thì khách chỉ cần quay lại trang là thấy
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const res = await fetch("/api/vouchers");
+        if (!res.ok) return; // chưa đăng nhập: bỏ qua
+        const json = await res.json();
+        if (!cancelled && json.success) {
+          setVouchers(json.data as VoucherItem[]);
+        }
+      } catch {
+        // Lỗi mạng: bỏ qua, khách vẫn nhập mã tay được
+      }
+    }
+
+    load();
+    window.addEventListener("focus", load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", load);
     };
   }, []);
 
@@ -538,6 +715,14 @@ export default function CheckoutPage() {
   function changeShippingCode(v: string) {
     setShippingCode(v);
     setFieldErrors((prev) => ({ ...prev, shippingCode: undefined }));
+  }
+
+  // VOUCHER KHÁCH: bấm vé thì điền mã vào đúng ô, bấm lần nữa thì bỏ mã
+  function pickVoucher(v: VoucherItem) {
+    const current = v.type === "discount" ? discountCode : shippingCode;
+    const next = current.trim().toUpperCase() === v.code ? "" : v.code;
+    if (v.type === "discount") changeDiscountCode(next);
+    else changeShippingCode(next);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -948,6 +1133,13 @@ export default function CheckoutPage() {
             Mỗi đơn dùng được 1 mã giảm tiền hàng và 1 mã giảm phí ship cùng
             lúc.
           </p>
+          <VoucherTickets
+            list={vouchers}
+            subtotal={subtotal}
+            discountCode={discountCode}
+            shippingCode={shippingCode}
+            onPick={pickVoucher}
+          />
           <div className="space-y-3">
             <VoucherField
               id="discountCode"

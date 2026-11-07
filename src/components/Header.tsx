@@ -89,6 +89,9 @@ export default async function Header() {
               <Link href="/custom" className={linkClass}>
                 Đặt làm
               </Link>
+              <Link href="/vouchers" className={linkClass}>
+                Voucher
+              </Link>
               <Link href="/wishlist" className={linkClass}>
                 Yêu thích
               </Link>

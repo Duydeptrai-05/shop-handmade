@@ -42,7 +42,7 @@ function toJson(r: {
 async function getCustomerId(): Promise<number | null> {
   const payload = await getAuthPayload();
   if (!payload || payload.role !== "customer") return null;
-  return Number(payload.id); // <-- xem ghi chú bên dưới
+  return Number(payload.id);
 }
 
 // GET: danh sách yêu cầu của chính khách đang đăng nhập
