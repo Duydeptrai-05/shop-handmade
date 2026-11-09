@@ -1,0 +1,4824 @@
+This file is a merged representation of a subset of the codebase, containing specifically included files, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Only files matching these patterns are included: src/app/api/**
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+src/
+  app/
+    api/
+      account/
+        addresses/
+          [id]/
+            route.ts
+          route.ts
+        password/
+          route.ts
+        profile/
+          route.ts
+      admin/
+        audit-logs/
+          route.ts
+        auth/
+          login/
+            route.ts
+        categories/
+          route.ts
+        custom-requests/
+          [id]/
+            route.ts
+          route.ts
+        customers/
+          [id]/
+            route.ts
+          route.ts
+        orders/
+          [id]/
+            payment/
+              route.ts
+            route.tsx
+          route.tsx
+        products/
+          [id]/
+            route.ts
+          route.ts
+        reviews/
+          [id]/
+            route.ts
+          route.ts
+        stats/
+          route.ts
+        stock-movements/
+          route.ts
+        upload/
+          route.ts
+        vouchers/
+          [id]/
+            route.ts
+          route.ts
+      assistant/
+        route.ts
+      auth/
+        forgot-password/
+          route.ts
+        login/
+          route.ts
+        logout/
+          route.ts
+        me/
+          route.ts
+        register/
+          route.ts
+        reset-password/
+          route.ts
+      custom-requests/
+        [id]/
+          route.ts
+        upload/
+          route.ts
+        route.ts
+      orders/
+        [id]/
+          route.ts
+        preview/
+          route.ts
+        shipping-count/
+          route.ts
+        route.ts
+      products/
+        [id]/
+          reviews/
+            route.ts
+      vouchers/
+        route.ts
+      wishlist/
+        [productId]/
+          route.ts
+        route.ts
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="src/app/api/account/addresses/[id]/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../../lib/auth";
+import { updateAddressSchema } from "../../../../../../lib/validation/address";
+
+const addressSelect = {
+  id: true,
+  recipientName: true,
+  phone: true,
+  address: true,
+  isDefault: true,
+} as const;
+
+function fail(message: string, status: number) {
+  return NextResponse.json({ success: false, message }, { status });
+}
+
+function parseId(raw: string): number | null {
+  const id = Number(raw);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+// PATCH /api/account/addresses/[id]: sửa thông tin hoặc đặt làm mặc định ({ "isDefault": true })
+// Không cho bỏ mặc định trực tiếp: muốn đổi thì đặt địa chỉ khác làm mặc định
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "customer") {
+      return fail("Vui lòng đăng nhập", 401);
+    }
+
+    const id = parseId((await params).id);
+    if (id === null) return fail("Không tìm thấy địa chỉ", 404);
+
+    const body = await request.json().catch(() => null);
+    const parsed = updateAddressSchema.safeParse(body);
+    if (!parsed.success) {
+      return fail(parsed.error.issues[0].message, 400);
+    }
+    const data = parsed.data;
+    const customerId = payload.id;
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Khóa dòng của khách để các thao tác sửa/xóa địa chỉ cùng lúc phải xếp hàng
+      await tx.$queryRaw`SELECT id FROM customers WHERE id = ${customerId} FOR UPDATE`;
+
+      const current = await tx.address.findFirst({ where: { id, customerId } });
+      if (!current) return { status: "not_found" as const };
+
+      if (data.isDefault === false && current.isDefault) {
+        return { status: "unset_default" as const };
+      }
+
+      if (data.isDefault === true) {
+        await tx.address.updateMany({
+          where: { customerId },
+          data: { isDefault: false },
+        });
+      }
+
+      const updated = await tx.address.update({
+        where: { id },
+        data,
+        select: addressSelect,
+      });
+      return { status: "ok" as const, updated };
+    });
+
+    if (result.status === "not_found")
+      return fail("Không tìm thấy địa chỉ", 404);
+    if (result.status === "unset_default") {
+      return fail(
+        "Hãy chọn một địa chỉ khác làm mặc định thay vì bỏ mặc định ở đây",
+        400,
+      );
+    }
+
+    return NextResponse.json({ success: true, data: result.updated });
+  } catch (error) {
+    console.error("[addresses PATCH]", error);
+    return fail("Có lỗi xảy ra, vui lòng thử lại sau", 500);
+  }
+}
+
+// DELETE /api/account/addresses/[id]: xóa địa chỉ
+// Nếu xóa địa chỉ mặc định thì địa chỉ mới nhất còn lại được lên làm mặc định
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "customer") {
+      return fail("Vui lòng đăng nhập", 401);
+    }
+
+    const id = parseId((await params).id);
+    if (id === null) return fail("Không tìm thấy địa chỉ", 404);
+
+    const customerId = payload.id;
+
+    const found = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM customers WHERE id = ${customerId} FOR UPDATE`;
+
+      const current = await tx.address.findFirst({ where: { id, customerId } });
+      if (!current) return false;
+
+      await tx.address.delete({ where: { id } });
+
+      if (current.isDefault) {
+        const next = await tx.address.findFirst({
+          where: { customerId },
+          orderBy: { id: "desc" },
+        });
+        if (next) {
+          await tx.address.update({
+            where: { id: next.id },
+            data: { isDefault: true },
+          });
+        }
+      }
+      return true;
+    });
+
+    if (!found) return fail("Không tìm thấy địa chỉ", 404);
+
+    return NextResponse.json({
+      success: true,
+      data: { message: "Đã xóa địa chỉ" },
+    });
+  } catch (error) {
+    console.error("[addresses DELETE]", error);
+    return fail("Có lỗi xảy ra, vui lòng thử lại sau", 500);
+  }
+}
+</file>
+
+<file path="src/app/api/account/addresses/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+import { addressSchema } from "../../../../../lib/validation/address";
+
+const MAX_ADDRESSES = 10;
+
+const addressSelect = {
+  id: true,
+  recipientName: true,
+  phone: true,
+  address: true,
+  isDefault: true,
+} as const;
+
+function fail(message: string, status: number) {
+  return NextResponse.json({ success: false, message }, { status });
+}
+
+// GET /api/account/addresses: danh sách địa chỉ của khách, địa chỉ mặc định đứng đầu
+export async function GET() {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "customer") {
+      return fail("Vui lòng đăng nhập", 401);
+    }
+
+    const addresses = await prisma.address.findMany({
+      where: { customerId: payload.id },
+      orderBy: [{ isDefault: "desc" }, { id: "desc" }],
+      select: addressSelect,
+    });
+
+    return NextResponse.json({ success: true, data: addresses });
+  } catch {
+    return fail("Có lỗi xảy ra, vui lòng thử lại sau", 500);
+  }
+}
+
+// POST /api/account/addresses: thêm địa chỉ mới
+// Địa chỉ đầu tiên tự thành mặc định; nếu gửi isDefault: true thì các địa chỉ cũ bỏ mặc định
+export async function POST(request: Request) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "customer") {
+      return fail("Vui lòng đăng nhập", 401);
+    }
+
+    const body = await request.json().catch(() => null);
+    const parsed = addressSchema.safeParse(body);
+    if (!parsed.success) {
+      return fail(parsed.error.issues[0].message, 400);
+    }
+
+    const { recipientName, phone, address, isDefault } = parsed.data;
+    const customerId = payload.id;
+
+    const created = await prisma.$transaction(async (tx) => {
+      // Khóa dòng của khách này để các yêu cầu thêm địa chỉ cùng lúc phải xếp hàng, tránh deadlock
+      await tx.$queryRaw`SELECT id FROM customers WHERE id = ${customerId} FOR UPDATE`;
+
+      const count = await tx.address.count({ where: { customerId } });
+      if (count >= MAX_ADDRESSES) return null;
+
+      const makeDefault = count === 0 || isDefault === true;
+      if (makeDefault) {
+        await tx.address.updateMany({
+          where: { customerId },
+          data: { isDefault: false },
+        });
+      }
+
+      return tx.address.create({
+        data: {
+          customerId,
+          recipientName,
+          phone,
+          address,
+          isDefault: makeDefault,
+        },
+        select: addressSelect,
+      });
+    });
+
+    if (!created) {
+      return fail(`Mỗi tài khoản chỉ lưu tối đa ${MAX_ADDRESSES} địa chỉ`, 400);
+    }
+
+    return NextResponse.json({ success: true, data: created }, { status: 201 });
+  } catch (error) {
+    console.error("[addresses POST]", error);
+    return fail("Có lỗi xảy ra, vui lòng thử lại sau", 500);
+  }
+}
+</file>
+
+<file path="src/app/api/account/password/route.ts">
+import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
+import { z } from "zod";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+
+const passwordSchema = z.object({
+  currentPassword: z.string().min(1, "Vui lòng nhập mật khẩu hiện tại"),
+  // Độ dài tối thiểu 6 giống trang đăng ký
+  newPassword: z
+    .string()
+    .min(6, "Mật khẩu mới phải có ít nhất 6 ký tự")
+    .max(100, "Mật khẩu mới quá dài"),
+});
+
+function fail(message: string, status: number) {
+  return NextResponse.json({ success: false, message }, { status });
+}
+
+// POST /api/account/password: đổi mật khẩu
+export async function POST(request: Request) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "customer") {
+      return fail("Vui lòng đăng nhập", 401);
+    }
+
+    const body = await request.json().catch(() => null);
+    const parsed = passwordSchema.safeParse(body);
+    if (!parsed.success) {
+      return fail(parsed.error.issues[0].message, 400);
+    }
+
+    const { currentPassword, newPassword } = parsed.data;
+
+    const customer = await prisma.customer.findUnique({
+      where: { id: payload.id },
+      select: { passwordHash: true },
+    });
+    if (!customer) return fail("Không tìm thấy tài khoản", 404);
+
+    const isMatch = await bcrypt.compare(
+      currentPassword,
+      customer.passwordHash,
+    );
+    if (!isMatch) return fail("Mật khẩu hiện tại không đúng", 400);
+
+    if (currentPassword === newPassword) {
+      return fail("Mật khẩu mới phải khác mật khẩu hiện tại", 400);
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await prisma.customer.update({
+      where: { id: payload.id },
+      data: { passwordHash },
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: { message: "Đổi mật khẩu thành công" },
+    });
+  } catch {
+    return fail("Có lỗi xảy ra, vui lòng thử lại sau", 500);
+  }
+}
+</file>
+
+<file path="src/app/api/account/profile/route.ts">
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+
+const profileSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Vui lòng nhập họ tên")
+    .max(255, "Họ tên quá dài"),
+  // Cho phép để trống (lưu null); nếu có nhập thì phải đúng dạng SĐT Việt Nam
+  phone: z
+    .string()
+    .trim()
+    .regex(/^(0|\+84)\d{9,10}$/, "Số điện thoại không hợp lệ")
+    .or(z.literal(""))
+    .optional(),
+});
+
+function fail(message: string, status: number) {
+  return NextResponse.json({ success: false, message }, { status });
+}
+
+// GET /api/account/profile: xem hồ sơ của khách đang đăng nhập
+export async function GET() {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "customer") {
+      return fail("Vui lòng đăng nhập", 401);
+    }
+
+    const customer = await prisma.customer.findUnique({
+      where: { id: payload.id },
+      select: { id: true, name: true, email: true, phone: true },
+    });
+    if (!customer) return fail("Không tìm thấy tài khoản", 404);
+
+    return NextResponse.json({ success: true, data: customer });
+  } catch {
+    return fail("Có lỗi xảy ra, vui lòng thử lại sau", 500);
+  }
+}
+
+// PATCH /api/account/profile: sửa tên, số điện thoại (email giữ nguyên)
+export async function PATCH(request: Request) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "customer") {
+      return fail("Vui lòng đăng nhập", 401);
+    }
+
+    const body = await request.json().catch(() => null);
+    const parsed = profileSchema.safeParse(body);
+    if (!parsed.success) {
+      return fail(parsed.error.issues[0].message, 400);
+    }
+
+    const { name, phone } = parsed.data;
+
+    const updated = await prisma.customer.update({
+      where: { id: payload.id },
+      data: { name, phone: phone ? phone : null },
+      select: { id: true, name: true, email: true, phone: true },
+    });
+
+    return NextResponse.json({ success: true, data: updated });
+  } catch {
+    return fail("Có lỗi xảy ra, vui lòng thử lại sau", 500);
+  }
+}
+</file>
+
+<file path="src/app/api/admin/categories/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+
+// GET /api/admin/categories
+export async function GET() {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin") {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập quản trị" },
+        { status: 401 },
+      );
+    }
+
+    const categories = await prisma.category.findMany({
+      select: { id: true, name: true },
+      orderBy: { id: "asc" },
+    });
+
+    return NextResponse.json({ success: true, data: categories });
+  } catch (error) {
+    console.error("GET /api/admin/categories lỗi:", error);
+    return NextResponse.json(
+      { success: false, message: "Không thể tải danh mục" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/admin/custom-requests/[id]/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../../lib/auth";
+import { logAudit } from "../../../../../../lib/audit";
+import { adminRequestSchema } from "../../../../../../lib/validation/custom-request";
+
+function fail(message: string, status: number) {
+  return NextResponse.json({ success: false, message }, { status });
+}
+
+type NextStatus = "quoted" | "rejected" | "in_progress" | "completed";
+
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin")
+      return fail("Bạn cần đăng nhập Admin", 401);
+
+    const admin = await prisma.admin.findUnique({
+      where: { id: Number(payload.id) },
+      select: { id: true, username: true },
+    });
+    if (!admin) return fail("Bạn cần đăng nhập Admin", 401);
+
+    const { id: idParam } = await params;
+    const id = Number(idParam);
+    if (!Number.isInteger(id) || id <= 0)
+      return fail("Mã yêu cầu không hợp lệ", 400);
+
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return fail("Dữ liệu gửi lên không hợp lệ", 400);
+    }
+
+    const parsed = adminRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return fail(
+        parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ",
+        400,
+      );
+    }
+    const input = parsed.data;
+
+    const current = await prisma.customRequest.findUnique({
+      where: { id },
+      select: { id: true, status: true, title: true },
+    });
+    if (!current) return fail("Không tìm thấy yêu cầu", 404);
+
+    // Mỗi hành động: trạng thái được phép đi từ đâu, đi tới đâu, ghi gì vào DB và nhật ký
+    let from: string[];
+    let to: NextStatus;
+    let extra: { quotedPrice?: number; adminNote?: string | null } = {};
+    let summary: string;
+    let errMsg: string;
+
+    switch (input.action) {
+      case "quote":
+        from = ["pending", "quoted"]; // cho phép báo lại giá khi khách chưa trả lời
+        to = "quoted";
+        extra = { quotedPrice: input.quotedPrice };
+        if (input.adminNote !== undefined)
+          extra.adminNote = input.adminNote || null;
+        summary = `báo giá yêu cầu #${id} "${current.title}": ${input.quotedPrice.toLocaleString("vi-VN")}đ`;
+        errMsg =
+          "Chỉ báo giá được khi yêu cầu đang chờ báo giá hoặc khách chưa trả lời";
+        break;
+      case "reject":
+        from = ["pending"];
+        to = "rejected";
+        extra = { adminNote: input.adminNote };
+        summary = `từ chối yêu cầu #${id} "${current.title}"`;
+        errMsg = "Chỉ từ chối được khi yêu cầu đang chờ báo giá";
+        break;
+      case "start":
+        from = ["accepted"];
+        to = "in_progress";
+        summary = `bắt đầu làm yêu cầu #${id} "${current.title}"`;
+        errMsg = "Chỉ bắt đầu làm được khi khách đã đồng ý báo giá";
+        break;
+      case "complete":
+        from = ["in_progress"];
+        to = "completed";
+        summary = `hoàn thành yêu cầu #${id} "${current.title}"`;
+        errMsg = "Chỉ hoàn thành được khi yêu cầu đang làm";
+        break;
+    }
+
+    if (!from.includes(current.status)) return fail(errMsg, 400);
+
+    // updateMany kèm điều kiện status: nếu khách vừa hủy/trả lời giữa chừng thì không ghi đè
+    const ok = await prisma.$transaction(async (tx) => {
+      const upd = await tx.customRequest.updateMany({
+        where: { id, status: current.status },
+        data: { status: to, ...extra },
+      });
+      if (upd.count === 0) return false;
+
+      await logAudit(
+        tx,
+        { id: admin.id, username: admin.username },
+        {
+          action: `custom_request.${input.action}`,
+          entityType: "custom_request",
+          entityId: id,
+          summary,
+        },
+      );
+      return true;
+    });
+    if (!ok)
+      return fail("Yêu cầu vừa được cập nhật, vui lòng tải lại trang", 409);
+
+    const row = await prisma.customRequest.findUnique({ where: { id } });
+    return NextResponse.json({
+      success: true,
+      data: {
+        id,
+        status: row?.status ?? to,
+        quotedPrice: row?.quotedPrice == null ? null : Number(row.quotedPrice),
+        adminNote: row?.adminNote ?? null,
+      },
+    });
+  } catch (e) {
+    console.error("[admin/custom-requests/id]", e);
+    return fail("Có lỗi xảy ra, vui lòng thử lại", 500);
+  }
+}
+</file>
+
+<file path="src/app/api/admin/custom-requests/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+
+const STATUSES = [
+  "pending",
+  "quoted",
+  "accepted",
+  "rejected",
+  "in_progress",
+  "completed",
+  "cancelled",
+] as const;
+type Status = (typeof STATUSES)[number];
+
+function fail(message: string, status: number) {
+  return NextResponse.json({ success: false, message }, { status });
+}
+
+export async function GET(req: Request) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin")
+      return fail("Bạn cần đăng nhập Admin", 401);
+
+    const statusParam = new URL(req.url).searchParams.get("status");
+    if (statusParam && !(STATUSES as readonly string[]).includes(statusParam)) {
+      return fail("Trạng thái lọc không hợp lệ", 400);
+    }
+
+    const [rows, grouped] = await Promise.all([
+      prisma.customRequest.findMany({
+        where: statusParam ? { status: statusParam as Status } : undefined,
+        orderBy: { createdAt: "desc" },
+        include: {
+          customer: {
+            select: { id: true, name: true, email: true, phone: true },
+          },
+        },
+      }),
+      prisma.customRequest.groupBy({ by: ["status"], _count: { _all: true } }),
+    ]);
+
+    // Số đếm cho từng trạng thái (kể cả trạng thái chưa có yêu cầu nào thì là 0)
+    const counts: Record<string, number> = {};
+    for (const s of STATUSES) counts[s] = 0;
+    for (const g of grouped) counts[g.status] = g._count._all;
+
+    const data = rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      description: r.description,
+      quantity: r.quantity,
+      budget: r.budget == null ? null : Number(r.budget),
+      referenceImageUrl: r.referenceImageUrl,
+      quotedPrice: r.quotedPrice == null ? null : Number(r.quotedPrice),
+      adminNote: r.adminNote,
+      status: r.status,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+      customer: r.customer,
+    }));
+
+    return NextResponse.json({ success: true, data, counts });
+  } catch (e) {
+    console.error("[admin/custom-requests]", e);
+    return fail("Có lỗi xảy ra, vui lòng thử lại", 500);
+  }
+}
+</file>
+
+<file path="src/app/api/admin/customers/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+
+// Chuẩn hóa để tìm không phân biệt hoa thường (giữ nguyên dấu tiếng Việt,
+// vì collation của MariaDB bỏ qua dấu nên lọc bằng JS cho chính xác)
+function normalize(text: string) {
+  return text.normalize("NFC").toLowerCase();
+}
+
+// GET /api/admin/customers?q=...&status=active|locked
+export async function GET(request: NextRequest) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin") {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập bằng tài khoản Admin" },
+        { status: 401 },
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const q = normalize((searchParams.get("q") ?? "").trim());
+    const status = searchParams.get("status");
+
+    const customers = await prisma.customer.findMany({
+      orderBy: { id: "desc" },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        isActive: true,
+        // chỉ tính đơn chưa hủy
+        orders: {
+          where: { status: { not: "cancelled" } },
+          select: {
+            orderItems: { select: { quantity: true, priceAtOrder: true } },
+          },
+        },
+      },
+    });
+
+    let rows = customers.map((c) => {
+      const totalSpent = c.orders.reduce(
+        (sum, order) =>
+          sum +
+          order.orderItems.reduce(
+            (s, item) => s + Number(item.priceAtOrder) * item.quantity,
+            0,
+          ),
+        0,
+      );
+      return {
+        id: c.id,
+        name: c.name,
+        email: c.email,
+        phone: c.phone,
+        isActive: c.isActive,
+        orderCount: c.orders.length,
+        totalSpent,
+      };
+    });
+
+    if (status === "active") rows = rows.filter((r) => r.isActive);
+    if (status === "locked") rows = rows.filter((r) => !r.isActive);
+
+    if (q) {
+      rows = rows.filter(
+        (r) =>
+          normalize(r.name).includes(q) ||
+          normalize(r.email).includes(q) ||
+          (r.phone ?? "").includes(q),
+      );
+    }
+
+    return NextResponse.json({ success: true, data: rows });
+  } catch (error) {
+    console.error("ADMIN_CUSTOMERS_LIST_ERROR", error);
+    return NextResponse.json(
+      { success: false, message: "Đã có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/admin/reviews/[id]/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../../lib/auth";
+import { updateReviewStatusSchema } from "../../../../../../lib/validation/review";
+import { logAudit } from "../../../../../../lib/audit";
+
+type Context = { params: Promise<{ id: string }> };
+
+function parseId(raw: string): number | null {
+  const id = Number(raw);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+// PATCH: Admin duyệt (approved) hoặc ẩn (hidden) một đánh giá
+export async function PATCH(request: Request, { params }: Context) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin") {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
+
+    const admin = await prisma.admin.findUnique({
+      where: { id: payload.id },
+      select: { id: true, username: true },
+    });
+    if (!admin) {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
+
+    const id = parseId((await params).id);
+    if (!id) {
+      return NextResponse.json(
+        { success: false, message: "Mã đánh giá không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, message: "Dữ liệu gửi lên không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    const parsed = updateReviewStatusSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Trạng thái không hợp lệ (chỉ nhận approved hoặc hidden)",
+        },
+        { status: 400 },
+      );
+    }
+
+    const existing = await prisma.review.findUnique({
+      where: { id },
+      select: {
+        status: true,
+        customer: { select: { name: true } },
+        product: { select: { name: true } },
+      },
+    });
+    if (!existing) {
+      return NextResponse.json(
+        { success: false, message: "Không tìm thấy đánh giá" },
+        { status: 404 },
+      );
+    }
+
+    if (existing.status === parsed.data.status) {
+      return NextResponse.json(
+        { success: false, message: "Đánh giá đã ở trạng thái này rồi" },
+        { status: 409 },
+      );
+    }
+
+    const newStatus = parsed.data.status;
+    let verb: string;
+    if (newStatus === "hidden") {
+      verb = "Ẩn";
+    } else if (existing.status === "hidden") {
+      verb = "Hiện lại";
+    } else {
+      verb = "Duyệt";
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const review = await tx.review.update({
+        where: { id },
+        data: { status: newStatus },
+        select: {
+          id: true,
+          rating: true,
+          comment: true,
+          status: true,
+          createdAt: true,
+          customer: { select: { id: true, name: true, email: true } },
+          product: {
+            select: { id: true, name: true, imageUrl: true, isActive: true },
+          },
+        },
+      });
+
+      await logAudit(
+        tx,
+        { id: admin.id, username: admin.username },
+        {
+          action: newStatus === "hidden" ? "review.hide" : "review.approve",
+          entityType: "review",
+          entityId: id,
+          summary: `${verb} đánh giá #${id} của "${existing.customer.name}" cho "${existing.product.name}"`,
+        },
+      );
+
+      return review;
+    });
+
+    return NextResponse.json({ success: true, data: updated });
+  } catch (error) {
+    console.error("PATCH /api/admin/reviews/[id] error:", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/admin/reviews/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+
+// Lọc theo trạng thái là tùy chọn: /api/admin/reviews?status=pending
+const querySchema = z.object({
+  status: z.enum(["pending", "approved", "hidden"]).optional(),
+});
+
+export async function GET(request: NextRequest) {
+  try {
+    // Chỉ Admin được xem toàn bộ đánh giá
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin") {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
+
+    const parsed = querySchema.safeParse({
+      status: request.nextUrl.searchParams.get("status") ?? undefined,
+    });
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, message: "Trạng thái lọc không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    const reviews = await prisma.review.findMany({
+      where: parsed.data.status ? { status: parsed.data.status } : undefined,
+      orderBy: { createdAt: "desc" }, // mới nhất lên đầu
+      select: {
+        id: true,
+        rating: true,
+        comment: true,
+        status: true,
+        createdAt: true,
+        customer: { select: { id: true, name: true, email: true } },
+        product: {
+          select: { id: true, name: true, imageUrl: true, isActive: true },
+        },
+      },
+    });
+
+    return NextResponse.json({ success: true, data: reviews });
+  } catch (error) {
+    console.error("GET /api/admin/reviews error:", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/admin/stats/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+
+// /api/admin/stats?range=today | 7d | 30d | month
+const querySchema = z.object({
+  range: z.enum(["today", "7d", "30d", "month"]).default("7d"),
+});
+
+// Kho dưới mức này thì cảnh báo sắp hết
+const LOW_STOCK = 10;
+
+// Việt Nam là UTC+7: nhóm theo ngày phải tính theo giờ VN, không theo UTC
+const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Chuỗi ngày dạng YYYY-MM-DD theo giờ VN
+function vnDateKey(date: Date) {
+  return new Date(date.getTime() + VN_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+// 00:00 giờ VN của ngày chứa `date` (trả về mốc thời gian UTC)
+function startOfVnDay(date: Date) {
+  const shifted = new Date(date.getTime() + VN_OFFSET_MS);
+  shifted.setUTCHours(0, 0, 0, 0);
+  return new Date(shifted.getTime() - VN_OFFSET_MS);
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    // Chỉ Admin được xem thống kê
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin") {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
+
+    const parsed = querySchema.safeParse({
+      range: request.nextUrl.searchParams.get("range") ?? undefined,
+    });
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, message: "Khoảng thời gian không hợp lệ" },
+        { status: 400 },
+      );
+    }
+    const { range } = parsed.data;
+
+    // Xác định mốc bắt đầu của kỳ thống kê
+    const now = new Date();
+    const todayStart = startOfVnDay(now);
+    let start: Date;
+    if (range === "today") {
+      start = todayStart;
+    } else if (range === "7d") {
+      start = new Date(todayStart.getTime() - 6 * DAY_MS);
+    } else if (range === "30d") {
+      start = new Date(todayStart.getTime() - 29 * DAY_MS);
+    } else {
+      // Từ ngày 1 của tháng hiện tại (giờ VN)
+      const shifted = new Date(now.getTime() + VN_OFFSET_MS);
+      shifted.setUTCDate(1);
+      shifted.setUTCHours(0, 0, 0, 0);
+      start = new Date(shifted.getTime() - VN_OFFSET_MS);
+    }
+
+    // Tất cả đơn tạo trong kỳ
+    const orders = await prisma.order.findMany({
+      where: { createdAt: { gte: start } },
+      include: { orderItems: { include: { product: true } } },
+    });
+
+    // Tạo sẵn từng ngày trong kỳ (kể cả ngày không có đơn) để biểu đồ liền mạch
+    const dayCount =
+      Math.round((todayStart.getTime() - start.getTime()) / DAY_MS) + 1;
+    const daily = new Map<
+      string,
+      { date: string; revenue: number; orders: number; completed: number }
+    >();
+    for (let i = 0; i < dayCount; i++) {
+      const key = vnDateKey(new Date(start.getTime() + i * DAY_MS));
+      daily.set(key, { date: key, revenue: 0, orders: 0, completed: 0 });
+    }
+
+    let revenue = 0;
+    let completedCount = 0;
+    let cancelledCount = 0;
+    let inProgressCount = 0;
+    const productSales = new Map<
+      number,
+      { id: number; name: string; imageUrl: string | null; quantity: number }
+    >();
+
+    for (const order of orders) {
+      // Giá trị đơn = tổng (giá lúc đặt x số lượng); Decimal của Prisma phải Number()
+      const orderTotal = order.orderItems.reduce(
+        (sum, item) => sum + Number(item.priceAtOrder) * item.quantity,
+        0,
+      );
+
+      const day = daily.get(vnDateKey(order.createdAt));
+      if (day) day.orders += 1;
+
+      if (order.status === "cancelled") {
+        cancelledCount += 1;
+        continue; // đơn đã hủy không tính vào doanh thu hay bán chạy
+      }
+
+      if (order.status === "completed") {
+        // Doanh thu chỉ tính đơn đã giao thành công
+        revenue += orderTotal;
+        completedCount += 1;
+        if (day) {
+          day.revenue += orderTotal;
+          day.completed += 1;
+        }
+      } else {
+        inProgressCount += 1;
+      }
+
+      // Sản phẩm bán chạy: gom số lượng từ mọi đơn chưa hủy
+      for (const item of order.orderItems) {
+        const current = productSales.get(item.productId);
+        if (current) {
+          current.quantity += item.quantity;
+        } else {
+          productSales.set(item.productId, {
+            id: item.productId,
+            name: item.product.name,
+            imageUrl: item.product.imageUrl,
+            quantity: item.quantity,
+          });
+        }
+      }
+    }
+
+    const topProducts = [...productSales.values()]
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, 5);
+
+    // Cảnh báo sản phẩm đang bán nhưng sắp hết hàng
+    const lowStock = await prisma.product.findMany({
+      where: { isActive: true, stock: { lt: LOW_STOCK } },
+      orderBy: { stock: "asc" },
+      take: 5,
+      select: { id: true, name: true, stock: true },
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        range,
+        summary: {
+          revenue,
+          totalOrders: orders.length,
+          completedOrders: completedCount,
+          cancelledOrders: cancelledCount,
+          inProgressOrders: inProgressCount,
+          averageOrderValue:
+            completedCount > 0 ? Math.round(revenue / completedCount) : 0,
+        },
+        daily: [...daily.values()],
+        topProducts,
+        lowStock,
+      },
+    });
+  } catch (error) {
+    console.error("GET /api/admin/stats error:", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/admin/stock-movements/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+
+const REASONS = ["import", "sale", "cancel_restore", "adjustment"] as const;
+type Reason = (typeof REASONS)[number];
+
+// GET /api/admin/stock-movements?productId=2&reason=import&q=nến&page=1&pageSize=20
+export async function GET(request: Request) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin") {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập quản trị" },
+        { status: 401 },
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+
+    const productId = Number(searchParams.get("productId"));
+    const reasonParam = searchParams.get("reason");
+    const q = searchParams.get("q")?.trim();
+    const page = Math.max(1, Math.floor(Number(searchParams.get("page"))) || 1);
+    const pageSize = Math.min(
+      100,
+      Math.max(1, Math.floor(Number(searchParams.get("pageSize"))) || 20),
+    );
+
+    if (reasonParam && !REASONS.includes(reasonParam as Reason)) {
+      return NextResponse.json(
+        { success: false, message: "Lý do không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    const where = {
+      ...(Number.isInteger(productId) && productId > 0 ? { productId } : {}),
+      ...(reasonParam ? { reason: reasonParam as Reason } : {}),
+      ...(q ? { product: { name: { contains: q } } } : {}),
+    };
+
+    const [total, rows] = await Promise.all([
+      prisma.stockMovement.count({ where }),
+      prisma.stockMovement.findMany({
+        where,
+        orderBy: { id: "desc" }, // mới nhất lên đầu
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: { product: { select: { id: true, name: true } } },
+      }),
+    ]);
+
+    const data = rows.map((m) => ({
+      id: m.id,
+      productId: m.productId,
+      productName: m.product.name,
+      orderId: m.orderId,
+      change: m.change,
+      stockAfter: m.stockAfter,
+      reason: m.reason,
+      note: m.note,
+      createdAt: m.createdAt,
+    }));
+
+    return NextResponse.json({ success: true, data, total, page, pageSize });
+  } catch (error) {
+    console.error("GET /api/admin/stock-movements lỗi:", error);
+    return NextResponse.json(
+      { success: false, message: "Không thể tải lịch sử tồn kho" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/admin/upload/route.ts">
+import { NextResponse } from "next/server";
+import { mkdir, writeFile } from "fs/promises";
+import path from "path";
+import { getAuthPayload } from "../../../../../lib/auth";
+import {
+  MAX_IMAGE_BYTES,
+  UPLOAD_DIR,
+  UPLOAD_URL_PREFIX,
+  checkImage,
+  randomImageName,
+} from "../../../../../lib/upload";
+
+export const runtime = "nodejs";
+
+export async function POST(request: Request) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin") {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Bạn không có quyền thực hiện thao tác này",
+        },
+        { status: 401 },
+      );
+    }
+
+    const form = await request.formData();
+    const file = form.get("file");
+
+    if (!(file instanceof File)) {
+      return NextResponse.json(
+        { success: false, message: "Vui lòng chọn một file ảnh" },
+        { status: 400 },
+      );
+    }
+
+    // Chặn sớm theo dung lượng khai báo, trước khi đọc file vào bộ nhớ
+    if (file.size > MAX_IMAGE_BYTES) {
+      return NextResponse.json(
+        { success: false, message: "Ảnh quá lớn, tối đa 2MB" },
+        { status: 400 },
+      );
+    }
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const check = checkImage(buffer);
+    if (check.ok === false) {
+      return NextResponse.json(
+        { success: false, message: check.message },
+        { status: 400 },
+      );
+    }
+
+    const fileName = randomImageName(check.ext);
+    await mkdir(UPLOAD_DIR, { recursive: true });
+    await writeFile(path.join(UPLOAD_DIR, fileName), buffer);
+
+    return NextResponse.json({
+      success: true,
+      data: { url: `${UPLOAD_URL_PREFIX}${fileName}` },
+    });
+  } catch (error) {
+    console.error("POST /api/admin/upload error:", error);
+    return NextResponse.json(
+      { success: false, message: "Không tải được ảnh, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/assistant/route.ts">
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import {
+  buildSystemPrompt,
+  parseProductRefs,
+} from "../../../../lib/shop-assistant";
+
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+
+const bodySchema = z.object({
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant"]),
+        content: z.string().trim().min(1).max(500),
+      }),
+    )
+    .min(1)
+    .max(30),
+});
+
+// Giới hạn theo IP (lưu trong bộ nhớ, khởi động lại server thì xóa)
+const PER_MINUTE = 8;
+const PER_DAY = 100;
+const hits = new Map<string, number[]>();
+
+function tooMany(ip: string): boolean {
+  const now = Date.now();
+  if (hits.size > 1000) hits.clear();
+  const list = (hits.get(ip) ?? []).filter((t) => now - t < 86_400_000);
+  const lastMinute = list.filter((t) => now - t < 60_000).length;
+  if (lastMinute >= PER_MINUTE || list.length >= PER_DAY) {
+    hits.set(ip, list);
+    return true;
+  }
+  list.push(now);
+  hits.set(ip, list);
+  return false;
+}
+
+function fail(status: number, message: string) {
+  return NextResponse.json({ success: false, message }, { status });
+}
+
+export async function POST(req: Request) {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return fail(
+        503,
+        "Trợ lý đang tạm nghỉ, bạn vui lòng nhắn Messenger hoặc Zalo của shop nhé.",
+      );
+    }
+
+    const ip =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+    if (tooMany(ip)) {
+      return fail(429, "Bạn hỏi hơi nhanh rồi, đợi một chút rồi hỏi tiếp nhé.");
+    }
+
+    let json: unknown;
+    try {
+      json = await req.json();
+    } catch {
+      return fail(400, "Dữ liệu gửi lên không hợp lệ.");
+    }
+
+    const parsed = bodySchema.safeParse(json);
+    if (!parsed.success) {
+      return fail(400, "Câu hỏi không hợp lệ (mỗi tin tối đa 500 ký tự).");
+    }
+
+    // Chỉ giữ 10 tin gần nhất, và phải bắt đầu bằng tin của khách
+    const msgs = parsed.data.messages.slice(-10);
+    while (msgs.length > 0 && msgs[0].role !== "user") msgs.shift();
+    if (msgs.length === 0 || msgs[msgs.length - 1].role !== "user") {
+      return fail(400, "Câu hỏi không hợp lệ.");
+    }
+
+    const systemPrompt = await buildSystemPrompt();
+    // Gemini 3.x dùng thinkingLevel; chat tư vấn chỉ cần suy nghĩ tối thiểu
+    const isGemini3 = GEMINI_MODEL.startsWith("gemini-3");
+    const generationConfig: Record<string, unknown> = isGemini3
+      ? { maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: "minimal" } }
+      : { maxOutputTokens: 4096, temperature: 0.6 };
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+        GEMINI_MODEL,
+      )}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: msgs.map((m) => ({
+            role: m.role === "assistant" ? "model" : "user",
+            parts: [{ text: m.content }],
+          })),
+          generationConfig,
+        }),
+        signal: AbortSignal.timeout(20_000),
+      },
+    );
+
+    if (!res.ok) {
+      const detail = (await res.text()).slice(0, 300);
+      console.error("[assistant] Gemini lỗi", res.status, detail);
+      if (res.status === 429) {
+        return fail(
+          429,
+          "Trợ lý đang quá tải, bạn thử lại sau ít phút hoặc nhắn Messenger/Zalo của shop nhé.",
+        );
+      }
+      return fail(502, "Trợ lý đang gặp sự cố, bạn vui lòng thử lại sau.");
+    }
+
+    const data = await res.json();
+    const finish = data?.candidates?.[0]?.finishReason;
+    if (finish && finish !== "STOP")
+      console.warn("[assistant] finishReason:", finish);
+    const raw: string = (data?.candidates?.[0]?.content?.parts ?? [])
+      .map((p: { text?: string }) => p.text ?? "")
+      .join("")
+      .trim();
+
+    if (!raw) {
+      return fail(
+        502,
+        "Trợ lý chưa trả lời được câu này, bạn thử hỏi theo cách khác nhé.",
+      );
+    }
+
+    const { text, products } = await parseProductRefs(raw);
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        reply: text,
+        products: products.map((p) => ({
+          id: p.id,
+          name: p.name,
+          price: p.price,
+          stock: p.stock,
+          imageUrl: p.imageUrl,
+        })),
+      },
+    });
+  } catch (err) {
+    console.error("[assistant] lỗi", err);
+    return fail(502, "Trợ lý đang gặp sự cố, bạn vui lòng thử lại sau.");
+  }
+}
+</file>
+
+<file path="src/app/api/auth/forgot-password/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../../lib/prisma";
+import { forgotPasswordSchema } from "../../../../../lib/validation/auth";
+import {
+  buildResetLink,
+  createResetToken,
+  sendResetEmail,
+} from "../../../../../lib/passwordReset";
+
+// Luôn trả cùng một câu, dù email có tồn tại hay không (tránh dò email)
+const GENERIC_MESSAGE =
+  "Nếu email này đã đăng ký, chúng tôi đã gửi liên kết đặt lại mật khẩu. Liên kết có hiệu lực 30 phút.";
+const COOLDOWN_SECONDS = 60; // yêu cầu liên tiếp trong 60 giây thì không tạo link mới
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json().catch(() => null);
+    const parsed = forgotPasswordSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, message: parsed.error.issues[0].message },
+        { status: 400 },
+      );
+    }
+
+    const customer = await prisma.customer.findUnique({
+      where: { email: parsed.data.email },
+    });
+
+    // Tài khoản không tồn tại hoặc đã bị khóa: không làm gì, vẫn trả câu chung
+    if (customer && customer.isActive) {
+      const recent = await prisma.passwordResetToken.findFirst({
+        where: {
+          customerId: customer.id,
+          createdAt: { gte: new Date(Date.now() - COOLDOWN_SECONDS * 1000) },
+        },
+      });
+
+      if (!recent) {
+        const { token, tokenHash, expiresAt } = createResetToken();
+
+        // Xóa các link cũ chưa dùng, chỉ giữ link mới nhất
+        await prisma.$transaction([
+          prisma.passwordResetToken.deleteMany({
+            where: { customerId: customer.id, usedAt: null },
+          }),
+          prisma.passwordResetToken.create({
+            data: { customerId: customer.id, tokenHash, expiresAt },
+          }),
+        ]);
+
+        try {
+          await sendResetEmail(
+            customer.email,
+            customer.name,
+            buildResetLink(token),
+          );
+        } catch (mailError) {
+          // Gửi mail lỗi chỉ ghi log, không báo cho người gọi biết email có tồn tại
+          console.error("[forgot-password] Gửi mail thất bại:", mailError);
+        }
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: { message: GENERIC_MESSAGE },
+    });
+  } catch (error) {
+    console.error("[forgot-password]", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại sau" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/auth/reset-password/route.ts">
+import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
+import { prisma } from "../../../../../lib/prisma";
+import { resetPasswordSchema } from "../../../../../lib/validation/auth";
+import { hashToken } from "../../../../../lib/passwordReset";
+
+const INVALID_LINK =
+  "Liên kết không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu lại.";
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json().catch(() => null);
+    const parsed = resetPasswordSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, message: parsed.error.issues[0].message },
+        { status: 400 },
+      );
+    }
+
+    const { token, password } = parsed.data;
+    const record = await prisma.passwordResetToken.findUnique({
+      where: { tokenHash: hashToken(token) },
+      include: { customer: true },
+    });
+
+    // Không có, đã dùng, hết hạn hoặc tài khoản bị khóa: cùng một câu lỗi
+    if (
+      !record ||
+      record.usedAt !== null ||
+      record.expiresAt < new Date() ||
+      !record.customer.isActive
+    ) {
+      return NextResponse.json(
+        { success: false, message: INVALID_LINK },
+        { status: 400 },
+      );
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const ok = await prisma.$transaction(async (tx) => {
+      // Đánh dấu đã dùng trước; nếu hai yêu cầu cùng lúc thì chỉ một cái thắng
+      const claimed = await tx.passwordResetToken.updateMany({
+        where: { id: record.id, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+      if (claimed.count === 0) return false;
+
+      await tx.customer.update({
+        where: { id: record.customerId },
+        data: { passwordHash },
+      });
+      // Các link khác của khách này (nếu còn) cũng vô hiệu
+      await tx.passwordResetToken.deleteMany({
+        where: { customerId: record.customerId, usedAt: null },
+      });
+      return true;
+    });
+
+    if (!ok) {
+      return NextResponse.json(
+        { success: false, message: INVALID_LINK },
+        { status: 400 },
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        message:
+          "Đặt lại mật khẩu thành công. Bạn có thể đăng nhập bằng mật khẩu mới.",
+      },
+    });
+  } catch (error) {
+    console.error("[reset-password]", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại sau" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/custom-requests/[id]/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+import { customerRespondSchema } from "../../../../../lib/validation/custom-request";
+
+function fail(message: string, status: number) {
+  return NextResponse.json({ success: false, message }, { status });
+}
+
+// Luật chuyển trạng thái phía khách
+const RULES = {
+  accept: {
+    from: ["quoted"],
+    to: "accepted",
+    error: "Chỉ đồng ý được khi shop đã báo giá",
+  },
+  decline: {
+    from: ["quoted"],
+    to: "rejected",
+    error: "Chỉ từ chối được khi shop đã báo giá",
+  },
+  cancel: {
+    from: ["pending", "quoted"],
+    to: "cancelled",
+    error: "Yêu cầu này không thể hủy ở trạng thái hiện tại",
+  },
+} as const;
+
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "customer")
+      return fail("Bạn cần đăng nhập", 401);
+    const customerId = Number(payload.id);
+
+    const { id: idParam } = await params;
+    const id = Number(idParam);
+    if (!Number.isInteger(id) || id <= 0)
+      return fail("Mã yêu cầu không hợp lệ", 400);
+
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return fail("Dữ liệu gửi lên không hợp lệ", 400);
+    }
+
+    const parsed = customerRespondSchema.safeParse(body);
+    if (!parsed.success) {
+      return fail(
+        parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ",
+        400,
+      );
+    }
+    const rule = RULES[parsed.data.action];
+
+    // Yêu cầu của người khác cũng trả 404 để không lộ sự tồn tại
+    const current = await prisma.customRequest.findFirst({
+      where: { id, customerId },
+      select: { id: true, status: true },
+    });
+    if (!current) return fail("Không tìm thấy yêu cầu", 404);
+
+    if (!(rule.from as readonly string[]).includes(current.status)) {
+      return fail(rule.error, 400);
+    }
+
+    // updateMany kèm điều kiện status: nếu Admin vừa đổi trạng thái giữa chừng thì không ghi đè
+    const result = await prisma.customRequest.updateMany({
+      where: { id, customerId, status: current.status },
+      data: { status: rule.to },
+    });
+    if (result.count === 0) {
+      return fail("Yêu cầu vừa được cập nhật, vui lòng tải lại trang", 409);
+    }
+
+    return NextResponse.json({ success: true, data: { id, status: rule.to } });
+  } catch (e) {
+    console.error("[custom-requests/id]", e);
+    return fail("Có lỗi xảy ra, vui lòng thử lại", 500);
+  }
+}
+</file>
+
+<file path="src/app/api/custom-requests/upload/route.ts">
+import { NextResponse } from "next/server";
+import { mkdir, writeFile } from "fs/promises";
+import path from "path";
+import { getAuthPayload } from "../../../../../lib/auth";
+import {
+  MAX_IMAGE_BYTES,
+  UPLOAD_DIR,
+  UPLOAD_URL_PREFIX,
+  checkImage,
+  randomImageName,
+} from "../../../../../lib/upload";
+
+export const runtime = "nodejs";
+
+// Khách upload ảnh tham khảo cho yêu cầu đặt làm
+export async function POST(request: Request) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "customer") {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập để tải ảnh lên" },
+        { status: 401 },
+      );
+    }
+
+    const form = await request.formData();
+    const file = form.get("file");
+
+    if (!(file instanceof File)) {
+      return NextResponse.json(
+        { success: false, message: "Vui lòng chọn một file ảnh" },
+        { status: 400 },
+      );
+    }
+
+    // Chặn sớm theo dung lượng khai báo, trước khi đọc file vào bộ nhớ
+    if (file.size > MAX_IMAGE_BYTES) {
+      return NextResponse.json(
+        { success: false, message: "Ảnh quá lớn, tối đa 2MB" },
+        { status: 400 },
+      );
+    }
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const check = checkImage(buffer);
+    if (check.ok === false) {
+      return NextResponse.json(
+        { success: false, message: check.message },
+        { status: 400 },
+      );
+    }
+
+    const fileName = randomImageName(check.ext);
+    await mkdir(UPLOAD_DIR, { recursive: true });
+    await writeFile(path.join(UPLOAD_DIR, fileName), buffer);
+
+    return NextResponse.json({
+      success: true,
+      data: { url: `${UPLOAD_URL_PREFIX}${fileName}` },
+    });
+  } catch (error) {
+    console.error("POST /api/custom-requests/upload error:", error);
+    return NextResponse.json(
+      { success: false, message: "Không tải được ảnh, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/orders/preview/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+import { createOrderSchema } from "../../../../../lib/validation/order";
+import { calcOrderTotals, toVoucherRule } from "../../../../../lib/shipping";
+import { findUsableVoucher } from "../../../../../lib/vouchers";
+
+// Chỉ cần giỏ hàng và hai ô mã, lấy lại từ schema đặt đơn để quy tắc luôn khớp nhau
+const previewSchema = createOrderSchema.pick({
+  items: true,
+  discountCode: true,
+  shippingCode: true,
+});
+
+// Xem trước tiền đơn hàng: KHÔNG tạo đơn, KHÔNG trừ kho.
+// Mã nào lỗi thì báo riêng ở ô đó và tính tiền như chưa nhập mã ấy.
+export async function POST(request: NextRequest) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "customer") {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập" },
+        { status: 401 },
+      );
+    }
+
+    const body = await request.json();
+    const parsed = previewSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Dữ liệu không hợp lệ",
+          errors: parsed.error.flatten().fieldErrors,
+        },
+        { status: 400 },
+      );
+    }
+    const input = parsed.data;
+
+    // Giá lấy từ DB, không tin client
+    const products = await prisma.product.findMany({
+      where: {
+        id: { in: input.items.map((item) => item.productId) },
+        isActive: true,
+      },
+    });
+    const productMap = new Map(products.map((p) => [p.id, p]));
+
+    let subtotal = 0;
+    for (const item of input.items) {
+      const product = productMap.get(item.productId);
+      if (!product) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: `Sản phẩm id=${item.productId} không tồn tại hoặc đã ngừng bán`,
+          },
+          { status: 400 },
+        );
+      }
+      subtotal += Number(product.price) * item.quantity;
+    }
+
+    const errors: { discountCode?: string; shippingCode?: string } = {};
+    let discountVoucher = null;
+    let shippingVoucher = null;
+
+    if (input.discountCode && input.discountCode.trim()) {
+      const r = await findUsableVoucher(prisma, {
+        code: input.discountCode,
+        slot: "discount",
+        customerId: payload.id,
+        subtotal,
+      });
+      if (r.ok === false) errors.discountCode = r.message;
+      else discountVoucher = r.voucher;
+    }
+
+    if (input.shippingCode && input.shippingCode.trim()) {
+      const r = await findUsableVoucher(prisma, {
+        code: input.shippingCode,
+        slot: "shipping",
+        customerId: payload.id,
+        subtotal,
+      });
+      if (r.ok === false) errors.shippingCode = r.message;
+      else shippingVoucher = r.voucher;
+    }
+
+    const totals = calcOrderTotals({
+      subtotal,
+      discountVoucher: discountVoucher ? toVoucherRule(discountVoucher) : null,
+      shippingVoucher: shippingVoucher ? toVoucherRule(shippingVoucher) : null,
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        ...totals,
+        discountVoucher: discountVoucher
+          ? {
+              code: discountVoucher.code,
+              description: discountVoucher.description,
+            }
+          : null,
+        shippingVoucher: shippingVoucher
+          ? {
+              code: shippingVoucher.code,
+              description: shippingVoucher.description,
+            }
+          : null,
+        errors,
+      },
+    });
+  } catch (error) {
+    console.error("POST /api/orders/preview error:", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/orders/shipping-count/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../../lib/prisma";
+import { getCurrentCustomer } from "../../../../../lib/auth";
+
+// Luôn đọc cookie mới, không cache
+export const dynamic = "force-dynamic";
+
+// GET /api/orders/shipping-count
+// Trả số đơn đang giao (shipped) của khách đang đăng nhập.
+// Chưa đăng nhập hoặc không phải Customer thì trả count = 0 (không báo lỗi,
+// vì Header gọi API này ở mọi trang).
+export async function GET() {
+  try {
+    const customer = await getCurrentCustomer();
+
+    if (!customer) {
+      return NextResponse.json({ success: true, data: { count: 0 } });
+    }
+
+    const count = await prisma.order.count({
+      where: { customerId: customer.id, status: "shipped" },
+    });
+
+    return NextResponse.json({ success: true, data: { count } });
+  } catch (error) {
+    console.error("[shipping-count]", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/vouchers/route.ts">
+// src/app/api/vouchers/route.ts
+// GET: danh sách voucher đang dùng được, cho khách đã đăng nhập xem ở trang thanh toán.
+// Voucher nào cũng công khai. Admin tạo, bật, tắt thì danh sách đổi theo ngay.
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../lib/prisma";
+import { getAuthPayload } from "../../../../lib/auth";
+
+export async function GET() {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "customer") {
+      return NextResponse.json(
+        { success: false, message: "Vui lòng đăng nhập" },
+        { status: 401 },
+      );
+    }
+    const customerId = payload.id;
+    const now = new Date();
+
+    // Voucher đang bật, đã đến ngày bắt đầu và chưa hết hạn
+    const vouchers = await prisma.voucher.findMany({
+      where: {
+        isActive: true,
+        AND: [
+          { OR: [{ startsAt: null }, { startsAt: { lte: now } }] },
+          { OR: [{ expiresAt: null }, { expiresAt: { gte: now } }] },
+        ],
+      },
+      orderBy: [{ type: "asc" }, { createdAt: "desc" }],
+    });
+
+    const data = await Promise.all(
+      vouchers.map(async (v) => {
+        // Mã nằm ở cột nào của đơn phụ thuộc loại voucher (giống lib/vouchers.ts)
+        const filter =
+          v.type === "discount"
+            ? { discountVoucherId: v.id }
+            : { shippingVoucherId: v.id };
+
+        const used =
+          v.usageLimit !== null
+            ? await prisma.order.count({
+                where: { status: { not: "cancelled" }, ...filter },
+              })
+            : 0;
+        const usedByMe =
+          (await prisma.order.count({
+            where: { customerId, status: { not: "cancelled" }, ...filter },
+          })) > 0;
+
+        return {
+          id: v.id,
+          code: v.code,
+          description: v.description,
+          type: v.type, // "discount" | "shipping"
+          discountKind: v.discountKind, // "percent" | "fixed"
+          value: Number(v.value),
+          maxDiscount: v.maxDiscount === null ? null : Number(v.maxDiscount),
+          minOrderValue: Number(v.minOrderValue),
+          expiresAt: v.expiresAt,
+          remaining:
+            v.usageLimit === null ? null : Math.max(v.usageLimit - used, 0),
+          soldOut: v.usageLimit !== null && used >= v.usageLimit,
+          usedByMe,
+        };
+      }),
+    );
+
+    return NextResponse.json({ success: true, data });
+  } catch (error) {
+    console.error("[vouchers] GET error:", error);
+    return NextResponse.json(
+      { success: false, message: "Không tải được danh sách voucher" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/wishlist/[productId]/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../../lib/prisma";
+import { getCurrentCustomer } from "../../../../../lib/auth";
+
+// DELETE /api/wishlist/[productId]: bỏ khỏi danh sách yêu thích
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ productId: string }> },
+) {
+  try {
+    const customer = await getCurrentCustomer();
+    if (!customer) {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập" },
+        { status: 401 },
+      );
+    }
+
+    const { productId: raw } = await params;
+    const productId = Number(raw);
+    if (!Number.isInteger(productId) || productId <= 0) {
+      return NextResponse.json(
+        { success: false, message: "Mã sản phẩm không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    // deleteMany: chỉ xóa dòng của đúng khách này, bỏ thích món chưa thích
+    // thì không báo lỗi (kết quả vẫn là "không còn trong danh sách")
+    await prisma.wishlist.deleteMany({
+      where: { customerId: customer.id, productId },
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: { productId, liked: false },
+    });
+  } catch {
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/wishlist/route.ts">
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { prisma } from "../../../../lib/prisma";
+import { getCurrentCustomer } from "../../../../lib/auth";
+
+const addSchema = z.object({
+  productId: z.number().int().positive(),
+});
+
+// GET /api/wishlist: danh sách món yêu thích của khách đang đăng nhập
+export async function GET() {
+  try {
+    const customer = await getCurrentCustomer();
+    if (!customer) {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập" },
+        { status: 401 },
+      );
+    }
+
+    const rows = await prisma.wishlist.findMany({
+      // Sản phẩm bị Admin ẩn thì không hiện trong danh sách yêu thích
+      where: { customerId: customer.id, product: { isActive: true } },
+      orderBy: { createdAt: "desc" },
+      include: { product: true },
+    });
+
+    const data = rows.map((r) => ({
+      productId: r.productId,
+      name: r.product.name,
+      price: Number(r.product.price),
+      imageUrl: r.product.imageUrl,
+      stock: r.product.stock,
+      addedAt: r.createdAt,
+    }));
+
+    return NextResponse.json({ success: true, data });
+  } catch {
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+
+// POST /api/wishlist  body: { productId }: thêm vào yêu thích
+export async function POST(request: Request) {
+  try {
+    const customer = await getCurrentCustomer();
+    if (!customer) {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập" },
+        { status: 401 },
+      );
+    }
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, message: "Dữ liệu gửi lên không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    const parsed = addSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, message: "Mã sản phẩm không hợp lệ" },
+        { status: 400 },
+      );
+    }
+    const { productId } = parsed.data;
+
+    const product = await prisma.product.findFirst({
+      where: { id: productId, isActive: true },
+      select: { id: true },
+    });
+    if (!product) {
+      return NextResponse.json(
+        { success: false, message: "Không tìm thấy sản phẩm" },
+        { status: 404 },
+      );
+    }
+
+    // upsert: thích rồi mà bấm lại thì không tạo thêm dòng, cũng không báo lỗi
+    await prisma.wishlist.upsert({
+      where: {
+        customerId_productId: { customerId: customer.id, productId },
+      },
+      update: {},
+      create: { customerId: customer.id, productId },
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: { productId, liked: true },
+    });
+  } catch {
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/admin/audit-logs/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+
+const PAGE_SIZE_DEFAULT = 30;
+const PAGE_SIZE_MAX = 100;
+
+// GET: Admin xem nhật ký thao tác
+// ?entityType=order|product|customer|voucher|review|custom_request  ?q=từ khóa trong nội dung
+// ?page=1  ?pageSize=30
+export async function GET(request: Request) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin") {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+
+    const entityType = searchParams.get("entityType")?.trim() || undefined;
+    const q = searchParams.get("q")?.trim() || undefined;
+
+    const pageRaw = Number(searchParams.get("page") ?? "1");
+    const page = Number.isInteger(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+
+    const sizeRaw = Number(searchParams.get("pageSize") ?? PAGE_SIZE_DEFAULT);
+    const pageSize =
+      Number.isInteger(sizeRaw) && sizeRaw > 0
+        ? Math.min(sizeRaw, PAGE_SIZE_MAX)
+        : PAGE_SIZE_DEFAULT;
+
+    const where = {
+      ...(entityType ? { entityType } : {}),
+      ...(q
+        ? {
+            OR: [
+              { summary: { contains: q } },
+              { adminUsername: { contains: q } },
+            ],
+          }
+        : {}),
+    };
+
+    const [total, logs] = await Promise.all([
+      prisma.auditLog.count({ where }),
+      prisma.auditLog.findMany({
+        where,
+        orderBy: { id: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          adminUsername: true,
+          action: true,
+          entityType: true,
+          entityId: true,
+          summary: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        logs,
+        total,
+        page,
+        pageSize,
+        hasMore: page * pageSize < total,
+      },
+    });
+  } catch (error) {
+    console.error("GET /api/admin/audit-logs error:", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/admin/auth/login/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
+import { z } from "zod";
+import { prisma } from "../../../../../../lib/prisma";
+import { setAuthCookie, signToken } from "../../../../../../lib/auth";
+import {
+  lockMinutesLeft,
+  lockedMessage,
+  registerFailedLogin,
+  clearFailedLogin,
+} from "../../../../../../lib/login-limit";
+
+const adminLoginSchema = z.object({
+  username: z.string().trim().min(1, "Vui lòng nhập tên đăng nhập"),
+  password: z.string().min(1, "Vui lòng nhập mật khẩu"),
+});
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const parsed = adminLoginSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Dữ liệu không hợp lệ",
+          errors: parsed.error.flatten().fieldErrors,
+        },
+        { status: 400 },
+      );
+    }
+    const { username, password } = parsed.data;
+
+    const admin = await prisma.admin.findUnique({ where: { username } });
+
+    // Đang bị khóa tạm do nhập sai nhiều lần: chặn luôn, không so mật khẩu
+    if (admin) {
+      const minutesLeft = lockMinutesLeft(admin.lockedUntil);
+      if (minutesLeft > 0) {
+        return NextResponse.json(
+          { success: false, message: lockedMessage(minutesLeft) },
+          { status: 429 },
+        );
+      }
+    }
+
+    const isValid = admin
+      ? await bcrypt.compare(password, admin.passwordHash)
+      : false;
+
+    // Cùng một thông báo cho "sai tên" và "sai mật khẩu",
+    // để người ngoài không dò được tên đăng nhập nào tồn tại
+    if (!admin || !isValid) {
+      // Chỉ ghi nhận lần sai khi tên đăng nhập có thật
+      if (admin) {
+        const result = await registerFailedLogin(prisma, "admin", admin.id);
+
+        if (result.locked) {
+          return NextResponse.json(
+            { success: false, message: lockedMessage(result.minutes) },
+            { status: 429 },
+          );
+        }
+
+        return NextResponse.json(
+          {
+            success: false,
+            message: `Sai tên đăng nhập hoặc mật khẩu. Bạn còn ${result.remaining} lần thử.`,
+          },
+          { status: 401 },
+        );
+      }
+
+      return NextResponse.json(
+        { success: false, message: "Sai tên đăng nhập hoặc mật khẩu" },
+        { status: 401 },
+      );
+    }
+
+    // Đăng nhập đúng: xóa bộ đếm sai (chỉ ghi DB khi thật sự có gì để xóa)
+    if (admin.failedLoginCount > 0 || admin.lockedUntil) {
+      await clearFailedLogin(prisma, "admin", admin.id);
+    }
+
+    const token = signToken({ id: admin.id, role: "admin" });
+    const response = NextResponse.json({
+      success: true,
+      data: { id: admin.id, username: admin.username },
+    });
+    setAuthCookie(response, token);
+    return response;
+  } catch (error) {
+    console.error("POST /api/admin/auth/login error:", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/admin/customers/[id]/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { randomInt } from "crypto";
+import bcrypt from "bcryptjs";
+import { z } from "zod";
+import { prisma } from "../../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../../lib/auth";
+import { logAudit } from "../../../../../../lib/audit"; // AUDIT
+
+const actionSchema = z.object({
+  action: z.enum(["lock", "unlock", "reset_password"], {
+    message: "Hành động không hợp lệ",
+  }),
+});
+
+// Mật khẩu tạm 10 ký tự, bỏ các ký tự dễ nhầm (0/O, 1/l/I)
+function generateTempPassword() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  let result = "";
+  for (let i = 0; i < 10; i++) {
+    result += chars[randomInt(chars.length)];
+  }
+  return result;
+}
+
+async function requireAdmin() {
+  const payload = await getAuthPayload();
+  return payload && payload.role === "admin" ? payload : null;
+}
+
+function parseId(raw: string) {
+  const id = Number(raw);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+// GET /api/admin/customers/[id]: chi tiết khách kèm các đơn
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const payload = await requireAdmin();
+    if (!payload) {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập bằng tài khoản Admin" },
+        { status: 401 },
+      );
+    }
+
+    const id = parseId((await params).id);
+    if (id === null) {
+      return NextResponse.json(
+        { success: false, message: "Mã khách hàng không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    const customer = await prisma.customer.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        isActive: true,
+        _count: { select: { reviews: true } },
+        orders: {
+          orderBy: { id: "desc" },
+          select: {
+            id: true,
+            status: true,
+            paymentMethod: true,
+            isPaid: true,
+            createdAt: true,
+            customerName: true,
+            phone: true,
+            address: true,
+            orderItems: {
+              select: {
+                quantity: true,
+                priceAtOrder: true,
+                product: { select: { name: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!customer) {
+      return NextResponse.json(
+        { success: false, message: "Không tìm thấy khách hàng" },
+        { status: 404 },
+      );
+    }
+
+    const orders = customer.orders.map((o) => ({
+      id: o.id,
+      status: o.status,
+      paymentMethod: o.paymentMethod,
+      isPaid: o.isPaid,
+      createdAt: o.createdAt,
+      customerName: o.customerName,
+      phone: o.phone,
+      address: o.address,
+      total: o.orderItems.reduce(
+        (s, i) => s + Number(i.priceAtOrder) * i.quantity,
+        0,
+      ),
+      items: o.orderItems.map((i) => ({
+        name: i.product.name,
+        quantity: i.quantity,
+        price: Number(i.priceAtOrder),
+      })),
+    }));
+
+    // Tổng tiền đã mua chỉ tính đơn chưa hủy
+    const activeOrders = orders.filter((o) => o.status !== "cancelled");
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        id: customer.id,
+        name: customer.name,
+        email: customer.email,
+        phone: customer.phone,
+        isActive: customer.isActive,
+        reviewCount: customer._count.reviews,
+        orderCount: activeOrders.length,
+        totalSpent: activeOrders.reduce((s, o) => s + o.total, 0),
+        orders,
+      },
+    });
+  } catch (error) {
+    console.error("ADMIN_CUSTOMER_DETAIL_ERROR", error);
+    return NextResponse.json(
+      { success: false, message: "Đã có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+
+// PATCH /api/admin/customers/[id]  body: { action: "lock" | "unlock" | "reset_password" }
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const payload = await requireAdmin();
+    if (!payload) {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập bằng tài khoản Admin" },
+        { status: 401 },
+      );
+    }
+
+    const id = parseId((await params).id);
+    if (id === null) {
+      return NextResponse.json(
+        { success: false, message: "Mã khách hàng không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    const body = await request.json().catch(() => null);
+    const parsed = actionSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, message: parsed.error.issues[0].message },
+        { status: 400 },
+      );
+    }
+
+    const customer = await prisma.customer.findUnique({
+      where: { id },
+      select: { id: true, isActive: true, name: true },
+    });
+    if (!customer) {
+      return NextResponse.json(
+        { success: false, message: "Không tìm thấy khách hàng" },
+        { status: 404 },
+      );
+    }
+
+    // AUDIT: lấy Admin đang thao tác để ghi nhật ký
+    const admin = await prisma.admin.findUnique({
+      where: { id: payload.id },
+      select: { id: true, username: true },
+    });
+    if (!admin) {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập bằng tài khoản Admin" },
+        { status: 401 },
+      );
+    }
+
+    const { action } = parsed.data;
+
+    if (action === "lock" || action === "unlock") {
+      const wantActive = action === "unlock";
+      if (customer.isActive === wantActive) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: wantActive
+              ? "Tài khoản này đang hoạt động"
+              : "Tài khoản này đã bị khóa trước đó",
+          },
+          { status: 409 },
+        );
+      }
+      await prisma.$transaction(async (tx) => {
+        await tx.customer.update({
+          where: { id },
+          data: { isActive: wantActive },
+        });
+        await logAudit(
+          tx,
+          { id: admin.id, username: admin.username },
+          {
+            action: wantActive ? "customer.unlock" : "customer.lock",
+            entityType: "customer",
+            entityId: id,
+            summary: `${wantActive ? "Mở khóa" : "Khóa"} tài khoản khách "${customer.name}" (#${id})`,
+          },
+        );
+      });
+      return NextResponse.json({
+        success: true,
+        data: { id, isActive: wantActive },
+      });
+    }
+
+    // reset_password: sinh mật khẩu tạm, chỉ trả về một lần
+    const tempPassword = generateTempPassword();
+    const passwordHash = await bcrypt.hash(tempPassword, 10);
+    await prisma.$transaction(async (tx) => {
+      await tx.customer.update({
+        where: { id },
+        data: { passwordHash },
+      });
+      // Không ghi mật khẩu tạm vào nhật ký
+      await logAudit(
+        tx,
+        { id: admin.id, username: admin.username },
+        {
+          action: "customer.reset_password",
+          entityType: "customer",
+          entityId: id,
+          summary: `Đặt lại mật khẩu cho khách "${customer.name}" (#${id})`,
+        },
+      );
+    });
+    return NextResponse.json({
+      success: true,
+      data: { id, tempPassword },
+    });
+  } catch (error) {
+    console.error("ADMIN_CUSTOMER_UPDATE_ERROR", error);
+    return NextResponse.json(
+      { success: false, message: "Đã có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/admin/orders/[id]/route.tsx">
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { prisma } from "../../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../../lib/auth";
+import { logStockMovement } from "../../../../../../lib/stock"; // STOCK
+import { logAudit } from "../../../../../../lib/audit"; // AUDIT
+
+const updateStatusSchema = z.object({
+  status: z.enum(["pending", "confirmed", "shipped", "completed", "cancelled"]),
+});
+
+// Trạng thái hiện tại -> các trạng thái được phép chuyển tới.
+// completed và cancelled là trạng thái cuối, không đổi được nữa.
+const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+  pending: ["confirmed", "cancelled"],
+  confirmed: ["shipped", "cancelled"],
+  shipped: ["completed"],
+  completed: [],
+  cancelled: [],
+};
+
+// AUDIT: nhãn tiếng Việt để câu mô tả trong nhật ký dễ đọc
+const STATUS_LABEL: Record<string, string> = {
+  pending: "Chờ xác nhận",
+  confirmed: "Đã xác nhận",
+  shipped: "Đang giao",
+  completed: "Hoàn thành",
+  cancelled: "Đã hủy",
+};
+
+class AdminOrderError extends Error {
+  status: number;
+  constructor(message: string, status = 400) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    // 1. Chỉ Admin được đổi trạng thái
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin") {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
+
+    // AUDIT: lấy username Admin để ghi nhật ký
+    const admin = await prisma.admin.findUnique({
+      where: { id: payload.id },
+      select: { id: true, username: true },
+    });
+    if (!admin) {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
+
+    // 2. Kiểm tra id trên URL
+    const { id } = await params;
+    const orderId = Number(id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      return NextResponse.json(
+        { success: false, message: "Mã đơn hàng không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    // 3. Kiểm tra body
+    const body = await request.json().catch(() => null);
+    const parsed = updateStatusSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, message: "Trạng thái không hợp lệ" },
+        { status: 400 },
+      );
+    }
+    const newStatus = parsed.data.status;
+
+    // 4. Đổi trạng thái (và hoàn kho nếu hủy) trong CÙNG một transaction
+    const updated = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { orderItems: true },
+      });
+      if (!order) {
+        throw new AdminOrderError("Không tìm thấy đơn hàng", 404);
+      }
+
+      const allowed = ALLOWED_TRANSITIONS[order.status] ?? [];
+      if (!allowed.includes(newStatus)) {
+        throw new AdminOrderError(
+          `Không thể chuyển đơn từ "${order.status}" sang "${newStatus}"`,
+        );
+      }
+      if (
+        order.paymentMethod === "bank_transfer" &&
+        !order.isPaid &&
+        newStatus !== "cancelled"
+      ) {
+        throw new AdminOrderError(
+          "Đơn chuyển khoản chưa nhận được tiền, hãy xác nhận đã nhận tiền trước khi xử lý đơn",
+        );
+      }
+
+      // Điều kiện status = trạng thái vừa đọc: nếu có Admin khác vừa đổi đơn
+      // này trước, count = 0 và ta dừng lại, tránh hoàn kho 2 lần
+      const result = await tx.order.updateMany({
+        where: { id: orderId, status: order.status },
+        data: { status: newStatus },
+      });
+      if (result.count === 0) {
+        throw new AdminOrderError(
+          "Đơn hàng vừa được cập nhật bởi người khác, vui lòng tải lại",
+          409,
+        );
+      }
+
+      // Hủy đơn -> trả hàng về kho
+      if (newStatus === "cancelled") {
+        for (const item of order.orderItems) {
+          await tx.product.update({
+            where: { id: item.productId },
+            data: { stock: { increment: item.quantity } },
+          });
+
+          // STOCK: ghi lịch sử hoàn kho, cùng transaction
+          await logStockMovement(tx, {
+            productId: item.productId,
+            change: item.quantity,
+            reason: "cancel_restore",
+            orderId,
+            note: "Admin hủy đơn",
+          });
+        }
+      }
+
+      // AUDIT: ghi nhật ký cùng transaction, đổi trạng thái thành công thì mới có log
+      await logAudit(tx, admin, {
+        action: newStatus === "cancelled" ? "order.cancel" : "order.status",
+        entityType: "order",
+        entityId: orderId,
+        summary: `Đổi đơn #${orderId} từ "${STATUS_LABEL[order.status]}" sang "${STATUS_LABEL[newStatus]}"`,
+      });
+
+      return tx.order.findUnique({
+        where: { id: orderId },
+        include: { orderItems: { include: { product: true } } },
+      });
+    });
+
+    return NextResponse.json({ success: true, data: updated });
+  } catch (error) {
+    if (error instanceof AdminOrderError) {
+      return NextResponse.json(
+        { success: false, message: error.message },
+        { status: error.status },
+      );
+    }
+    console.error("PATCH /api/admin/orders/[id] error:", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/admin/orders/route.tsx">
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+import { cancelExpiredBankOrders } from "../../../../../lib/expire-orders"; // MỚI
+
+// Lọc theo trạng thái là tùy chọn: /api/admin/orders?status=pending
+const querySchema = z.object({
+  status: z
+    .enum(["pending", "confirmed", "shipped", "completed", "cancelled"])
+    .optional(),
+});
+
+export async function GET(request: NextRequest) {
+  try {
+    // Chỉ Admin được xem toàn bộ đơn hàng
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin") {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
+
+    const parsed = querySchema.safeParse({
+      status: request.nextUrl.searchParams.get("status") ?? undefined,
+    });
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, message: "Trạng thái lọc không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    // MỚI: hủy đơn chuyển khoản quá hạn trước khi trả danh sách,
+    // để Admin thấy đúng trạng thái và kho đã được hoàn
+    await cancelExpiredBankOrders().catch((e) =>
+      console.error("cancelExpiredBankOrders (GET /api/admin/orders):", e),
+    );
+
+    const orders = await prisma.order.findMany({
+      where: parsed.data.status ? { status: parsed.data.status } : undefined,
+      orderBy: { id: "desc" }, // đơn mới nhất lên đầu
+      include: {
+        orderItems: { include: { product: true } },
+      },
+    });
+
+    return NextResponse.json({ success: true, data: orders });
+  } catch (error) {
+    console.error("GET /api/admin/orders error:", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/admin/products/[id]/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../../lib/auth";
+import { updateProductSchema } from "../../../../../../lib/validation/product";
+import { logStockMovement } from "../../../../../../lib/stock"; //
+import { logAudit } from "../../../../../../lib/audit"; // AUDIT
+
+type Context = { params: Promise<{ id: string }> };
+
+async function requireAdmin() {
+  const payload = await getAuthPayload();
+  if (!payload || payload.role !== "admin") {
+    return NextResponse.json(
+      { success: false, message: "Bạn cần đăng nhập quản trị" },
+      { status: 401 },
+    );
+  }
+  return null;
+}
+
+// AUDIT: lấy Admin đang thao tác để ghi nhật ký
+async function getAdminActor() {
+  const payload = await getAuthPayload();
+  if (!payload) return null;
+  return prisma.admin.findUnique({
+    where: { id: payload.id },
+    select: { id: true, username: true },
+  });
+}
+
+function parseId(raw: string): number | null {
+  const id = Number(raw);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+// PATCH /api/admin/products/[id]  — chỉ gửi các trường cần đổi
+export async function PATCH(request: Request, { params }: Context) {
+  try {
+    const denied = await requireAdmin();
+    if (denied) return denied;
+
+    const admin = await getAdminActor();
+    if (!admin) {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập quản trị" },
+        { status: 401 },
+      );
+    }
+
+    const id = parseId((await params).id);
+    if (!id) {
+      return NextResponse.json(
+        { success: false, message: "Mã sản phẩm không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, message: "Dữ liệu gửi lên không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    const parsed = updateProductSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, message: parsed.error.issues[0].message },
+        { status: 400 },
+      );
+    }
+    if (Object.keys(parsed.data).length === 0) {
+      return NextResponse.json(
+        { success: false, message: "Không có thông tin nào để cập nhật" },
+        { status: 400 },
+      );
+    }
+
+    const existing = await prisma.product.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!existing) {
+      return NextResponse.json(
+        { success: false, message: "Không tìm thấy sản phẩm" },
+        { status: 404 },
+      );
+    }
+
+    // Nếu đổi danh mục thì danh mục mới phải tồn tại
+    if (parsed.data.categoryId !== undefined) {
+      const category = await prisma.category.findUnique({
+        where: { id: parsed.data.categoryId },
+        select: { id: true },
+      });
+      if (!category) {
+        return NextResponse.json(
+          { success: false, message: "Danh mục không tồn tại" },
+          { status: 400 },
+        );
+      }
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      // STOCK: đọc tồn kho ngay trước khi sửa, trong cùng transaction,
+      // để tính chênh lệch đúng kể cả khi vừa có đơn đặt hàng
+      const before = await tx.product.findUnique({
+        where: { id },
+        select: { stock: true, name: true, price: true, isActive: true },
+      });
+
+      const product = await tx.product.update({
+        where: { id },
+        data: parsed.data, // trường nào undefined thì Prisma bỏ qua
+      });
+
+      const newStock = parsed.data.stock;
+      if (before && newStock !== undefined && newStock !== before.stock) {
+        const change = newStock - before.stock;
+        await logStockMovement(tx, {
+          productId: id,
+          change,
+          reason: change > 0 ? "import" : "adjustment",
+          note:
+            change > 0
+              ? "Admin nhập thêm hàng"
+              : "Admin giảm tồn kho khi sửa sản phẩm",
+        });
+      }
+
+      // AUDIT: gom các thay đổi thành một câu mô tả
+      const d = parsed.data;
+      const changes: string[] = [];
+      if (before) {
+        if (d.name !== undefined && d.name !== before.name)
+          changes.push(`tên "${before.name}" → "${d.name}"`);
+        if (d.price !== undefined && d.price !== Number(before.price))
+          changes.push(
+            `giá ${Number(before.price).toLocaleString("vi-VN")}đ → ${d.price.toLocaleString("vi-VN")}đ`,
+          );
+        if (d.stock !== undefined && d.stock !== before.stock)
+          changes.push(`tồn kho ${before.stock} → ${d.stock}`);
+        if (d.isActive !== undefined && d.isActive !== before.isActive)
+          changes.push(d.isActive ? "hiện lại sản phẩm" : "ẩn sản phẩm");
+      }
+      if (d.description !== undefined) changes.push("đổi mô tả");
+      if (d.imageUrl !== undefined) changes.push("đổi ảnh");
+      if (d.categoryId !== undefined) changes.push("đổi danh mục");
+
+      if (changes.length > 0) {
+        await logAudit(
+          tx,
+          { id: admin.id, username: admin.username },
+          {
+            action: "product.update",
+            entityType: "product",
+            entityId: id,
+            summary: `Sửa sản phẩm #${id}: ${changes.join(", ")}`,
+          },
+        );
+      }
+
+      return product;
+    });
+    return NextResponse.json({
+      success: true,
+      data: { ...updated, price: Number(updated.price) },
+    });
+  } catch (error) {
+    console.error("PATCH /api/admin/products/[id] lỗi:", error);
+    return NextResponse.json(
+      { success: false, message: "Không thể cập nhật sản phẩm" },
+      { status: 500 },
+    );
+  }
+}
+
+// DELETE /api/admin/products/[id]  — soft delete: chỉ ẩn sản phẩm
+export async function DELETE(_request: Request, { params }: Context) {
+  try {
+    const denied = await requireAdmin();
+    if (denied) return denied;
+
+    const admin = await getAdminActor();
+    if (!admin) {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập quản trị" },
+        { status: 401 },
+      );
+    }
+
+    const id = parseId((await params).id);
+    if (!id) {
+      return NextResponse.json(
+        { success: false, message: "Mã sản phẩm không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    const existing = await prisma.product.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!existing) {
+      return NextResponse.json(
+        { success: false, message: "Không tìm thấy sản phẩm" },
+        { status: 404 },
+      );
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.product.update({
+        where: { id },
+        data: { isActive: false },
+      });
+      await logAudit(
+        tx,
+        { id: admin.id, username: admin.username },
+        {
+          action: "product.hide",
+          entityType: "product",
+          entityId: id,
+          summary: `Ẩn sản phẩm #${id}`,
+        },
+      );
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: { id, isActive: false },
+    });
+  } catch (error) {
+    console.error("DELETE /api/admin/products/[id] lỗi:", error);
+    return NextResponse.json(
+      { success: false, message: "Không thể ẩn sản phẩm" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/admin/products/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+import { productSchema } from "../../../../../lib/validation/product";
+import { logStockMovement } from "../../../../../lib/stock"; // STOCK
+import { logAudit } from "../../../../../lib/audit"; // AUDIT
+
+// Kiểm tra đăng nhập Admin, trả về null nếu hợp lệ
+async function requireAdmin() {
+  const payload = await getAuthPayload();
+  if (!payload || payload.role !== "admin") {
+    return NextResponse.json(
+      { success: false, message: "Bạn cần đăng nhập quản trị" },
+      { status: 401 },
+    );
+  }
+  return null;
+}
+
+// GET /api/admin/products?q=nến&status=active|inactive&categoryId=1
+export async function GET(request: Request) {
+  try {
+    const denied = await requireAdmin();
+    if (denied) return denied;
+
+    const { searchParams } = new URL(request.url);
+    const q = searchParams.get("q")?.trim();
+    const status = searchParams.get("status");
+    const categoryId = Number(searchParams.get("categoryId"));
+
+    const products = await prisma.product.findMany({
+      where: {
+        ...(q ? { name: { contains: q } } : {}),
+        ...(status === "active" ? { isActive: true } : {}),
+        ...(status === "inactive" ? { isActive: false } : {}),
+        ...(Number.isInteger(categoryId) && categoryId > 0
+          ? { categoryId }
+          : {}),
+      },
+      include: { category: { select: { id: true, name: true } } },
+      orderBy: { id: "desc" },
+    });
+
+    const data = products.map((p) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      price: Number(p.price), // Decimal -> number
+      imageUrl: p.imageUrl,
+      stock: p.stock,
+      isActive: p.isActive,
+      categoryId: p.categoryId,
+      category: p.category,
+    }));
+
+    return NextResponse.json({ success: true, data });
+  } catch (error) {
+    console.error("GET /api/admin/products lỗi:", error);
+    return NextResponse.json(
+      { success: false, message: "Không thể tải danh sách sản phẩm" },
+      { status: 500 },
+    );
+  }
+}
+
+// POST /api/admin/products
+export async function POST(request: Request) {
+  try {
+    const denied = await requireAdmin();
+    if (denied) return denied;
+
+    // AUDIT: lấy Admin đang thao tác để ghi nhật ký
+    const payload = await getAuthPayload();
+    const admin = payload
+      ? await prisma.admin.findUnique({
+          where: { id: payload.id },
+          select: { id: true, username: true },
+        })
+      : null;
+    if (!admin) {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập quản trị" },
+        { status: 401 },
+      );
+    }
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, message: "Dữ liệu gửi lên không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    const parsed = productSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, message: parsed.error.issues[0].message },
+        { status: 400 },
+      );
+    }
+
+    const input = parsed.data;
+
+    // Danh mục phải tồn tại
+    const category = await prisma.category.findUnique({
+      where: { id: input.categoryId },
+      select: { id: true },
+    });
+    if (!category) {
+      return NextResponse.json(
+        { success: false, message: "Danh mục không tồn tại" },
+        { status: 400 },
+      );
+    }
+
+    const created = await prisma.$transaction(async (tx) => {
+      const product = await tx.product.create({
+        data: {
+          name: input.name,
+          description: input.description ?? null,
+          price: input.price,
+          imageUrl: input.imageUrl ?? null,
+          stock: input.stock,
+          categoryId: input.categoryId,
+          // isActive dùng mặc định true trong schema
+        },
+      });
+
+      // STOCK: tồn ban đầu > 0 thì ghi là nhập hàng
+      if (product.stock > 0) {
+        await logStockMovement(tx, {
+          productId: product.id,
+          change: product.stock,
+          reason: "import",
+          note: "Tồn kho ban đầu khi tạo sản phẩm",
+        });
+      }
+
+      // AUDIT: ghi nhật ký tạo sản phẩm
+      await logAudit(
+        tx,
+        { id: admin.id, username: admin.username },
+        {
+          action: "product.create",
+          entityType: "product",
+          entityId: product.id,
+          summary: `Tạo sản phẩm "${product.name}" (#${product.id})`,
+        },
+      );
+
+      return product;
+    });
+
+    return NextResponse.json(
+      {
+        success: true,
+        data: { ...created, price: Number(created.price) },
+      },
+      { status: 201 },
+    );
+  } catch (error) {
+    console.error("POST /api/admin/products lỗi:", error);
+    return NextResponse.json(
+      { success: false, message: "Không thể tạo sản phẩm" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/admin/vouchers/[id]/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "../../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../../lib/auth";
+import { updateVoucherSchema } from "../../../../../../lib/validation/voucher";
+import { logAudit } from "../../../../../../lib/audit"; // AUDIT
+
+type RouteContext = { params: Promise<{ id: string }> };
+
+function fail(message: string, status: number) {
+  return NextResponse.json({ success: false, message }, { status });
+}
+
+// Số lượt đã dùng: chỉ đếm đơn chưa hủy, theo đúng loại của voucher
+async function countUsed(voucherId: number, type: string) {
+  return prisma.order.count({
+    where: {
+      status: { not: "cancelled" },
+      ...(type === "discount"
+        ? { discountVoucherId: voucherId }
+        : { shippingVoucherId: voucherId }),
+    },
+  });
+}
+
+export async function PATCH(request: NextRequest, { params }: RouteContext) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin") {
+      return fail("Bạn không có quyền truy cập", 401);
+    }
+
+    // AUDIT: lấy Admin đang thao tác để ghi nhật ký
+    const admin = await prisma.admin.findUnique({
+      where: { id: payload.id },
+      select: { id: true, username: true },
+    });
+    if (!admin) return fail("Bạn không có quyền truy cập", 401);
+
+    const { id: rawId } = await params;
+    const id = Number(rawId);
+    if (!Number.isInteger(id) || id <= 0) {
+      return fail("Mã voucher không hợp lệ", 400);
+    }
+
+    const body = await request.json().catch(() => null);
+    const parsed = updateVoucherSchema.safeParse(body);
+    if (!parsed.success) {
+      return fail(
+        parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ",
+        400,
+      );
+    }
+    const data = parsed.data;
+
+    const current = await prisma.voucher.findUnique({ where: { id } });
+    if (!current) return fail("Không tìm thấy voucher", 404);
+
+    // Giá trị sau khi sửa = giá trị mới nếu có, không thì giữ giá trị cũ
+    const value =
+      data.value !== undefined ? Number(data.value) : Number(current.value);
+    if (!(value > 0)) return fail("Giá trị giảm phải lớn hơn 0", 400);
+    if (current.discountKind === "percent" && value > 100) {
+      return fail("Giảm theo % không được quá 100", 400);
+    }
+
+    const startsAt =
+      data.startsAt !== undefined
+        ? data.startsAt
+          ? new Date(data.startsAt)
+          : null
+        : current.startsAt;
+    const expiresAt =
+      data.expiresAt !== undefined
+        ? data.expiresAt
+          ? new Date(data.expiresAt)
+          : null
+        : current.expiresAt;
+    if (startsAt && expiresAt && expiresAt <= startsAt) {
+      return fail("Ngày hết hạn phải sau ngày bắt đầu", 400);
+    }
+
+    // Không cho hạ giới hạn lượt dùng xuống dưới số lượt đã dùng
+    const usedCount = await countUsed(id, current.type);
+    if (
+      data.usageLimit !== undefined &&
+      data.usageLimit !== null &&
+      data.usageLimit < usedCount
+    ) {
+      return fail(
+        `Voucher đã được dùng ${usedCount} lượt, giới hạn không được nhỏ hơn số này`,
+        400,
+      );
+    }
+
+    const voucher = await prisma.$transaction(async (tx) => {
+      const updated = await tx.voucher.update({
+        where: { id },
+        data: {
+          ...(data.description !== undefined && {
+            description: data.description || null,
+          }),
+          ...(data.value !== undefined && { value: data.value }),
+          // Mức giảm tối đa chỉ có ý nghĩa khi giảm theo %
+          ...(current.discountKind === "percent"
+            ? data.maxDiscount !== undefined && {
+                maxDiscount: data.maxDiscount ?? null,
+              }
+            : { maxDiscount: null }),
+          ...(data.minOrderValue !== undefined && {
+            minOrderValue: data.minOrderValue ?? 0,
+          }),
+          ...(data.startsAt !== undefined && { startsAt }),
+          ...(data.expiresAt !== undefined && { expiresAt }),
+          ...(data.usageLimit !== undefined && {
+            usageLimit: data.usageLimit ?? null,
+          }),
+          ...(data.isActive !== undefined && { isActive: data.isActive }),
+        },
+      });
+
+      // AUDIT: so sánh với giá trị cũ để chỉ ghi những gì thật sự đổi
+      const fmt = (n: number) =>
+        current.discountKind === "percent"
+          ? `${n}%`
+          : `${n.toLocaleString("vi-VN")}đ`;
+      const toggled =
+        data.isActive !== undefined && data.isActive !== current.isActive;
+      const changes: string[] = [];
+      if (data.value !== undefined && value !== Number(current.value))
+        changes.push(`giá trị ${fmt(Number(current.value))} → ${fmt(value)}`);
+      if (
+        data.description !== undefined &&
+        (data.description || null) !== (current.description ?? null)
+      )
+        changes.push("đổi mô tả");
+      if (
+        current.discountKind === "percent" &&
+        data.maxDiscount !== undefined &&
+        (data.maxDiscount ?? null) !==
+          (current.maxDiscount === null ? null : Number(current.maxDiscount))
+      )
+        changes.push("đổi mức giảm tối đa");
+      if (
+        data.minOrderValue !== undefined &&
+        (data.minOrderValue ?? 0) !== Number(current.minOrderValue)
+      )
+        changes.push("đổi đơn tối thiểu");
+      if (
+        data.startsAt !== undefined &&
+        (startsAt?.getTime() ?? null) !== (current.startsAt?.getTime() ?? null)
+      )
+        changes.push("đổi ngày bắt đầu");
+      if (
+        data.expiresAt !== undefined &&
+        (expiresAt?.getTime() ?? null) !==
+          (current.expiresAt?.getTime() ?? null)
+      )
+        changes.push("đổi ngày hết hạn");
+      if (
+        data.usageLimit !== undefined &&
+        (data.usageLimit ?? null) !== current.usageLimit
+      )
+        changes.push(
+          `giới hạn lượt ${current.usageLimit ?? "không giới hạn"} → ${data.usageLimit ?? "không giới hạn"}`,
+        );
+
+      if (changes.length > 0 || toggled) {
+        const onlyToggle = toggled && changes.length === 0;
+        await logAudit(
+          tx,
+          { id: admin.id, username: admin.username },
+          {
+            action: onlyToggle ? "voucher.toggle" : "voucher.update",
+            entityType: "voucher",
+            entityId: id,
+            summary: onlyToggle
+              ? `${data.isActive ? "Bật" : "Tắt"} voucher ${current.code}`
+              : `Sửa voucher ${current.code}: ${[
+                  ...(toggled ? [data.isActive ? "bật" : "tắt"] : []),
+                  ...changes,
+                ].join(", ")}`,
+          },
+        );
+      }
+
+      return updated;
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: { ...voucher, usedCount },
+    });
+  } catch (error) {
+    console.error("PATCH /api/admin/vouchers/[id] error:", error);
+    return fail("Có lỗi xảy ra, vui lòng thử lại", 500);
+  }
+}
+
+// Chỉ xóa được voucher chưa từng gắn vào đơn nào; đã dùng rồi thì chỉ tắt
+export async function DELETE(_request: NextRequest, { params }: RouteContext) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin") {
+      return fail("Bạn không có quyền truy cập", 401);
+    }
+
+    // AUDIT: lấy Admin đang thao tác để ghi nhật ký
+    const admin = await prisma.admin.findUnique({
+      where: { id: payload.id },
+      select: { id: true, username: true },
+    });
+    if (!admin) return fail("Bạn không có quyền truy cập", 401);
+
+    const { id: rawId } = await params;
+    const id = Number(rawId);
+    if (!Number.isInteger(id) || id <= 0) {
+      return fail("Mã voucher không hợp lệ", 400);
+    }
+
+    const voucher = await prisma.voucher.findUnique({
+      where: { id },
+      select: { id: true, code: true },
+    });
+    if (!voucher) return fail("Không tìm thấy voucher", 404);
+
+    // Tính cả đơn đã hủy: đơn cũ vẫn đang tham chiếu voucher này
+    const linked = await prisma.order.count({
+      where: {
+        OR: [{ discountVoucherId: id }, { shippingVoucherId: id }],
+      },
+    });
+    if (linked > 0) {
+      return fail(
+        "Voucher đã gắn với đơn hàng nên không xóa được, hãy tắt voucher thay vì xóa",
+        409,
+      );
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.voucher.delete({ where: { id } });
+      await logAudit(
+        tx,
+        { id: admin.id, username: admin.username },
+        {
+          action: "voucher.delete",
+          entityType: "voucher",
+          entityId: id,
+          summary: `Xóa voucher ${voucher.code}`,
+        },
+      );
+    });
+
+    return NextResponse.json({ success: true, data: { id } });
+  } catch (error) {
+    console.error("DELETE /api/admin/vouchers/[id] error:", error);
+    return fail("Có lỗi xảy ra, vui lòng thử lại", 500);
+  }
+}
+</file>
+
+<file path="src/app/api/admin/vouchers/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+import { createVoucherSchema } from "../../../../../lib/validation/voucher";
+import { logAudit } from "../../../../../lib/audit"; // AUDIT
+
+// Đơn đã hủy không tính vào số lượt đã dùng
+const activeOrderFilter = { where: { status: { not: "cancelled" as const } } };
+
+// Gắn thêm usedCount (số lượt đã dùng) vào voucher
+function withUsedCount<
+  T extends {
+    type: string;
+    _count: { discountOrders: number; shippingOrders: number };
+  },
+>(voucher: T) {
+  const { _count, ...rest } = voucher;
+  return {
+    ...rest,
+    usedCount:
+      voucher.type === "discount"
+        ? _count.discountOrders
+        : _count.shippingOrders,
+  };
+}
+
+export async function GET() {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin") {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
+
+    const vouchers = await prisma.voucher.findMany({
+      orderBy: { id: "desc" }, // voucher mới nhất lên đầu
+      include: {
+        _count: {
+          select: {
+            discountOrders: activeOrderFilter,
+            shippingOrders: activeOrderFilter,
+          },
+        },
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: vouchers.map(withUsedCount),
+    });
+  } catch (error) {
+    console.error("GET /api/admin/vouchers error:", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin") {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
+
+    // AUDIT: lấy Admin đang thao tác để ghi nhật ký
+    const admin = await prisma.admin.findUnique({
+      where: { id: payload.id },
+      select: { id: true, username: true },
+    });
+    if (!admin) {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
+
+    const body = await request.json().catch(() => null);
+    const parsed = createVoucherSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ",
+        },
+        { status: 400 },
+      );
+    }
+    const data = parsed.data;
+
+    // Mã đã tồn tại thì báo rõ thay vì để lỗi cơ sở dữ liệu
+    const existing = await prisma.voucher.findUnique({
+      where: { code: data.code },
+      select: { id: true },
+    });
+    if (existing) {
+      return NextResponse.json(
+        { success: false, message: `Mã ${data.code} đã tồn tại` },
+        { status: 409 },
+      );
+    }
+
+    const voucher = await prisma.$transaction(async (tx) => {
+      const created = await tx.voucher.create({
+        data: {
+          code: data.code,
+          description: data.description || null,
+          type: data.type,
+          discountKind: data.discountKind,
+          value: data.value,
+          // Mức giảm tối đa chỉ có ý nghĩa khi giảm theo %
+          maxDiscount:
+            data.discountKind === "percent" ? (data.maxDiscount ?? null) : null,
+          minOrderValue: data.minOrderValue ?? 0,
+          startsAt: data.startsAt ? new Date(data.startsAt) : null,
+          expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
+          usageLimit: data.usageLimit ?? null,
+          isActive: data.isActive ?? true,
+        },
+      });
+
+      // AUDIT: ghi nhật ký tạo voucher
+      const loai =
+        data.type === "discount" ? "giảm tiền hàng" : "giảm phí ship";
+      const giaTri =
+        data.discountKind === "percent"
+          ? `${data.value}%`
+          : `${Number(data.value).toLocaleString("vi-VN")}đ`;
+      await logAudit(
+        tx,
+        { id: admin.id, username: admin.username },
+        {
+          action: "voucher.create",
+          entityType: "voucher",
+          entityId: created.id,
+          summary: `Tạo voucher ${created.code} (${loai}, ${giaTri})`,
+        },
+      );
+
+      return created;
+    });
+
+    return NextResponse.json(
+      { success: true, data: { ...voucher, usedCount: 0 } },
+      { status: 201 },
+    );
+  } catch (error) {
+    // Hai người cùng tạo một mã cùng lúc: cơ sở dữ liệu báo trùng khóa
+    if ((error as { code?: string }).code === "P2002") {
+      return NextResponse.json(
+        { success: false, message: "Mã voucher đã tồn tại" },
+        { status: 409 },
+      );
+    }
+    console.error("POST /api/admin/vouchers error:", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/auth/logout/route.ts">
+import { NextResponse } from "next/server";
+import { clearAuthCookie } from "../../../../../lib/auth";
+
+export async function POST() {
+  const response = NextResponse.json({
+    success: true,
+    message: "Đã đăng xuất",
+  });
+  clearAuthCookie(response);
+  return response;
+}
+</file>
+
+<file path="src/app/api/auth/me/route.ts">
+import { NextResponse } from "next/server";
+import { getAuthPayload } from "../../../../../lib/auth";
+import { prisma } from "../../../../../lib/prisma";
+
+export async function GET() {
+  try {
+    const payload = await getAuthPayload();
+
+    if (!payload || payload.role !== "customer") {
+      return NextResponse.json(
+        { success: false, message: "Chưa đăng nhập" },
+        { status: 401 },
+      );
+    }
+
+    const customer = await prisma.customer.findUnique({
+      where: { id: payload.id },
+      select: { id: true, name: true, email: true },
+    });
+
+    if (!customer) {
+      return NextResponse.json(
+        { success: false, message: "Không tìm thấy tài khoản" },
+        { status: 404 },
+      );
+    }
+
+    return NextResponse.json({ success: true, data: customer });
+  } catch (error) {
+    console.error("ME_ERROR", error);
+    return NextResponse.json(
+      { success: false, message: "Đã có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/auth/register/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
+import { prisma } from "../../../../../lib/prisma";
+import { registerSchema } from "../../../../../lib/validation/auth";
+import { signToken, setAuthCookie } from "../../../../../lib/auth";
+
+const BCRYPT_COST = 10;
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const parsed = registerSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, message: parsed.error.issues[0].message },
+        { status: 400 },
+      );
+    }
+
+    const { name, email, password } = parsed.data;
+
+    const existing = await prisma.customer.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+
+    if (existing) {
+      return NextResponse.json(
+        { success: false, message: "Email này đã được đăng ký" },
+        { status: 409 },
+      );
+    }
+
+    const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
+
+    const customer = await prisma.customer.create({
+      data: { name, email, passwordHash },
+      select: { id: true, name: true, email: true },
+    });
+
+    const token = signToken({ id: customer.id, role: "customer" });
+
+    const response = NextResponse.json({ success: true, data: customer });
+    setAuthCookie(response, token);
+
+    return response;
+  } catch (error) {
+    console.error("REGISTER_ERROR", error);
+    return NextResponse.json(
+      { success: false, message: "Đã có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/custom-requests/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../lib/prisma";
+import { getAuthPayload } from "../../../../lib/auth";
+import { createCustomRequestSchema } from "../../../../lib/validation/custom-request";
+
+const MAX_OPEN_REQUESTS = 5; // tối đa 5 yêu cầu đang chờ báo giá cùng lúc
+
+function fail(message: string, status: number) {
+  return NextResponse.json({ success: false, message }, { status });
+}
+
+// Đổi Decimal sang number trước khi trả JSON
+function toJson(r: {
+  id: number;
+  title: string;
+  description: string;
+  quantity: number;
+  budget: unknown;
+  referenceImageUrl: string | null;
+  quotedPrice: unknown;
+  adminNote: string | null;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: r.id,
+    title: r.title,
+    description: r.description,
+    quantity: r.quantity,
+    budget: r.budget == null ? null : Number(r.budget),
+    referenceImageUrl: r.referenceImageUrl,
+    quotedPrice: r.quotedPrice == null ? null : Number(r.quotedPrice),
+    adminNote: r.adminNote,
+    status: r.status,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+// Lấy customerId từ phiên đăng nhập, null nếu không phải khách
+async function getCustomerId(): Promise<number | null> {
+  const payload = await getAuthPayload();
+  if (!payload || payload.role !== "customer") return null;
+  return Number(payload.id);
+}
+
+// GET: danh sách yêu cầu của chính khách đang đăng nhập
+export async function GET() {
+  try {
+    const customerId = await getCustomerId();
+    if (customerId === null) return fail("Bạn cần đăng nhập", 401);
+
+    const rows = await prisma.customRequest.findMany({
+      where: { customerId },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return NextResponse.json({ success: true, data: rows.map(toJson) });
+  } catch (e) {
+    console.error("[custom-requests]", e);
+    return fail("Có lỗi xảy ra, vui lòng thử lại", 500);
+  }
+}
+
+// POST: khách gửi yêu cầu mới
+export async function POST(req: Request) {
+  try {
+    const customerId = await getCustomerId();
+    if (customerId === null) return fail("Bạn cần đăng nhập", 401);
+
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return fail("Dữ liệu gửi lên không hợp lệ", 400);
+    }
+
+    const parsed = createCustomRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return fail(
+        parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ",
+        400,
+      );
+    }
+
+    const openCount = await prisma.customRequest.count({
+      where: { customerId, status: "pending" },
+    });
+    if (openCount >= MAX_OPEN_REQUESTS) {
+      return fail(
+        `Bạn đang có ${MAX_OPEN_REQUESTS} yêu cầu chờ báo giá, vui lòng chờ shop phản hồi hoặc hủy bớt`,
+        429,
+      );
+    }
+
+    const { title, description, quantity, budget, referenceImageUrl } =
+      parsed.data;
+
+    const created = await prisma.customRequest.create({
+      data: {
+        customerId, // lấy từ phiên đăng nhập, không lấy từ body
+        title,
+        description,
+        quantity,
+        budget: budget ?? null,
+        referenceImageUrl: referenceImageUrl ?? null,
+        // status mặc định pending, quotedPrice/adminNote khách không được gửi
+      },
+    });
+
+    return NextResponse.json(
+      { success: true, data: toJson(created) },
+      { status: 201 },
+    );
+  } catch {
+    return fail("Có lỗi xảy ra, vui lòng thử lại", 500);
+  }
+}
+</file>
+
+<file path="src/app/api/orders/[id]/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../lib/auth";
+import { updateOrderSchema } from "../../../../../lib/validation/order";
+import { cancelExpiredBankOrders } from "../../../../../lib/expire-orders";
+import { logStockMovement } from "../../../../../lib/stock";
+
+class OrderError extends Error {
+  status: number;
+  constructor(message: string, status = 400) {
+    super(message);
+    this.status = status;
+  }
+}
+
+// Khách hủy đơn hoặc đổi thông tin nhận hàng (chỉ khi đơn còn "pending")
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    // 1. Xác thực: customerId lấy từ token
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "customer") {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập" },
+        { status: 401 },
+      );
+    }
+
+    // 2. Mã đơn trên URL
+    const { id } = await params;
+    const orderId = Number(id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      return NextResponse.json(
+        { success: false, message: "Mã đơn không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    // Hủy trước các đơn chuyển khoản quá hạn để trạng thái luôn đúng
+    await cancelExpiredBankOrders().catch((e) =>
+      console.error("cancelExpiredBankOrders (PATCH /api/orders/[id]):", e),
+    );
+
+    // 3. Validate body
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, message: "Dữ liệu gửi lên không hợp lệ" },
+        { status: 400 },
+      );
+    }
+    const parsed = updateOrderSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Dữ liệu không hợp lệ",
+          errors: parsed.error.flatten(),
+        },
+        { status: 400 },
+      );
+    }
+    const input = parsed.data;
+
+    // 4. Tìm đơn CỦA CHÍNH khách này (đơn người khác -> 404, không lộ là có tồn tại)
+    const order = await prisma.order.findFirst({
+      where: { id: orderId, customerId: payload.id },
+      include: { orderItems: true },
+    });
+    if (!order) {
+      throw new OrderError("Không tìm thấy đơn hàng", 404);
+    }
+
+    // 5. Chỉ sửa được khi shop chưa xác nhận
+    if (order.status !== "pending") {
+      throw new OrderError(
+        order.status === "cancelled"
+          ? "Đơn này đã được hủy trước đó"
+          : "Shop đã xác nhận đơn này nên không thể tự thay đổi, vui lòng liên hệ shop",
+      );
+    }
+
+    if (input.action === "cancel") {
+      // Đã chuyển khoản xong thì hoàn tiền là việc thủ công -> không cho tự hủy
+      if (order.paymentMethod === "bank_transfer" && order.isPaid) {
+        throw new OrderError(
+          "Đơn này đã thanh toán chuyển khoản, vui lòng liên hệ shop để được hỗ trợ hủy và hoàn tiền",
+        );
+      }
+
+      await prisma.$transaction(async (tx) => {
+        // Điều kiện status = pending ngay trong câu update:
+        // nếu Admin vừa xác nhận cùng lúc thì count = 0, không hủy nhầm
+        const result = await tx.order.updateMany({
+          where: { id: orderId, customerId: payload.id, status: "pending" },
+          data: { status: "cancelled" },
+        });
+        if (result.count === 0) {
+          throw new OrderError(
+            "Trạng thái đơn vừa thay đổi, vui lòng tải lại trang",
+            409,
+          );
+        }
+
+        // Hoàn kho cho từng món và ghi lịch sử
+        for (const item of order.orderItems) {
+          await tx.product.update({
+            where: { id: item.productId },
+            data: { stock: { increment: item.quantity } },
+          });
+
+          await logStockMovement(tx, {
+            productId: item.productId,
+            change: item.quantity,
+            reason: "cancel_restore",
+            orderId,
+            note: "Khách tự hủy đơn",
+          });
+        }
+      });
+    } else {
+      // update_address
+      const result = await prisma.order.updateMany({
+        where: { id: orderId, customerId: payload.id, status: "pending" },
+        data: {
+          customerName: input.customerName,
+          phone: input.phone,
+          address: input.address,
+        },
+      });
+      if (result.count === 0) {
+        throw new OrderError(
+          "Trạng thái đơn vừa thay đổi, vui lòng tải lại trang",
+          409,
+        );
+      }
+    }
+
+    // 6. Trả đơn mới nhất, cùng dạng với GET /api/orders
+    const updated = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { orderItems: { include: { product: true } } },
+    });
+
+    return NextResponse.json({ success: true, data: updated });
+  } catch (error) {
+    if (error instanceof OrderError) {
+      return NextResponse.json(
+        { success: false, message: error.message },
+        { status: error.status },
+      );
+    }
+    console.error("PATCH /api/orders/[id] error:", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/products/[id]/reviews/route.ts">
+import { NextResponse } from "next/server";
+import { prisma } from "../../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../../lib/auth";
+import { createReviewSchema } from "../../../../../../lib/validation/review";
+
+type Context = { params: Promise<{ id: string }> };
+
+function parseId(raw: string): number | null {
+  const id = Number(raw);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+// Lấy customerId từ token; null nếu chưa đăng nhập hoặc không phải Customer
+async function getCustomerId(): Promise<number | null> {
+  const payload = await getAuthPayload();
+  if (!payload || payload.role !== "customer") return null;
+  return Number(payload.id); // <-- xem ghi chú bên dưới
+}
+
+// Khách có đơn completed chứa sản phẩm này không?
+async function hasPurchased(customerId: number, productId: number) {
+  const item = await prisma.orderItem.findFirst({
+    where: {
+      productId,
+      order: { customerId, status: "completed" },
+    },
+    select: { id: true },
+  });
+  return item !== null;
+}
+
+// GET: tình trạng review của khách hiện tại với sản phẩm này
+export async function GET(_request: Request, { params }: Context) {
+  try {
+    const productId = parseId((await params).id);
+    if (!productId) {
+      return NextResponse.json(
+        { success: false, message: "Mã sản phẩm không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    const customerId = await getCustomerId();
+    if (!customerId) {
+      return NextResponse.json({
+        success: true,
+        data: { loggedIn: false, canReview: false, hasReviewed: false },
+      });
+    }
+
+    const [purchased, existing] = await Promise.all([
+      hasPurchased(customerId, productId),
+      prisma.review.findUnique({
+        where: { productId_customerId: { productId, customerId } },
+        select: { id: true, status: true },
+      }),
+    ]);
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        loggedIn: true,
+        canReview: purchased && !existing,
+        hasReviewed: existing !== null,
+        reviewStatus: existing?.status ?? null,
+      },
+    });
+  } catch (error) {
+    console.error("GET /api/products/[id]/reviews lỗi:", error);
+    return NextResponse.json(
+      { success: false, message: "Không thể kiểm tra quyền đánh giá" },
+      { status: 500 },
+    );
+  }
+}
+
+// POST: viết review
+export async function POST(request: Request, { params }: Context) {
+  try {
+    const customerId = await getCustomerId();
+    if (!customerId) {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập để đánh giá" },
+        { status: 401 },
+      );
+    }
+
+    const productId = parseId((await params).id);
+    if (!productId) {
+      return NextResponse.json(
+        { success: false, message: "Mã sản phẩm không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, message: "Dữ liệu gửi lên không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    const parsed = createReviewSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, message: parsed.error.issues[0].message },
+        { status: 400 },
+      );
+    }
+
+    const product = await prisma.product.findFirst({
+      where: { id: productId, isActive: true },
+      select: { id: true },
+    });
+    if (!product) {
+      return NextResponse.json(
+        { success: false, message: "Không tìm thấy sản phẩm" },
+        { status: 404 },
+      );
+    }
+
+    if (!(await hasPurchased(customerId, productId))) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Bạn chỉ có thể đánh giá sản phẩm đã mua và đơn hàng đã hoàn thành",
+        },
+        { status: 403 },
+      );
+    }
+
+    try {
+      const review = await prisma.review.create({
+        data: {
+          productId,
+          customerId,
+          rating: parsed.data.rating,
+          comment: parsed.data.comment ?? null,
+          status: "pending",
+        },
+      });
+      return NextResponse.json(
+        { success: true, data: review },
+        { status: 201 },
+      );
+    } catch (e) {
+      // P2002 = vi phạm UNIQUE(productId, customerId): đã đánh giá rồi
+      if (
+        typeof e === "object" &&
+        e !== null &&
+        "code" in e &&
+        (e as { code?: string }).code === "P2002"
+      ) {
+        return NextResponse.json(
+          { success: false, message: "Bạn đã đánh giá sản phẩm này rồi" },
+          { status: 409 },
+        );
+      }
+      throw e;
+    }
+  } catch (error) {
+    console.error("POST /api/products/[id]/reviews lỗi:", error);
+    return NextResponse.json(
+      { success: false, message: "Không thể gửi đánh giá" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/admin/orders/[id]/payment/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "../../../../../../../lib/prisma";
+import { getAuthPayload } from "../../../../../../../lib/auth";
+import { cancelExpiredBankOrders } from "../../../../../../../lib/expire-orders"; // MỚI
+import { logAudit } from "../../../../../../../lib/audit";
+
+class PaymentError extends Error {
+  status: number;
+  constructor(message: string, status = 400) {
+    super(message);
+    this.status = status;
+  }
+}
+
+// Admin xác nhận đã nhận được tiền chuyển khoản của một đơn
+export async function PATCH(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    // 1. Chỉ Admin được xác nhận thanh toán
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "admin") {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
+    // Lấy username Admin để ghi nhật ký (giống file orders/[id]/route.ts)
+    const admin = await prisma.admin.findUnique({
+      where: { id: payload.id },
+      select: { username: true },
+    });
+    if (!admin) {
+      return NextResponse.json(
+        { success: false, message: "Bạn không có quyền truy cập" },
+        { status: 401 },
+      );
+    }
+    // 2. Kiểm tra id trên URL
+    const { id } = await params;
+    const orderId = Number(id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      return NextResponse.json(
+        { success: false, message: "Mã đơn hàng không hợp lệ" },
+        { status: 400 },
+      );
+    }
+
+    // MỚI: hủy các đơn chuyển khoản quá hạn trước, để một đơn đã quá hạn
+    // rơi vào nhánh "đã bị hủy" bên dưới thay vì được xác nhận nhầm
+    await cancelExpiredBankOrders().catch((e) =>
+      console.error("cancelExpiredBankOrders (PATCH payment):", e),
+    );
+
+    // 3. Kiểm tra điều kiện và ghi nhận trong cùng một transaction
+    const updated = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({ where: { id: orderId } });
+      if (!order) {
+        throw new PaymentError("Không tìm thấy đơn hàng", 404);
+      }
+      if (order.paymentMethod !== "bank_transfer") {
+        throw new PaymentError("Đơn này không thanh toán bằng chuyển khoản");
+      }
+      if (order.status === "cancelled") {
+        throw new PaymentError(
+          "Đơn hàng đã bị hủy (hoặc quá hạn chuyển khoản), không thể xác nhận thanh toán",
+        );
+      }
+      if (order.isPaid) {
+        throw new PaymentError("Đơn này đã được xác nhận thanh toán rồi", 409);
+      }
+
+      // Điều kiện isPaid = false ngay trong câu update: nếu có Admin khác vừa
+      // xác nhận trước thì count = 0, tránh ghi đè giờ nhận tiền
+      const result = await tx.order.updateMany({
+        where: { id: orderId, isPaid: false },
+        data: { isPaid: true, paidAt: new Date() },
+      });
+      if (result.count === 0) {
+        throw new PaymentError(
+          "Đơn hàng vừa được cập nhật bởi người khác, vui lòng tải lại",
+          409,
+        );
+      }
+
+      await logAudit(
+        tx,
+        { id: payload.id, username: admin.username },
+        {
+          action: "order.payment",
+          entityType: "order",
+          entityId: orderId,
+          summary: `Xác nhận đã nhận tiền chuyển khoản đơn #${orderId}`,
+        },
+      );
+
+      return tx.order.findUnique({
+        where: { id: orderId },
+        include: { orderItems: { include: { product: true } } },
+      });
+    });
+
+    return NextResponse.json({ success: true, data: updated });
+  } catch (error) {
+    if (error instanceof PaymentError) {
+      return NextResponse.json(
+        { success: false, message: error.message },
+        { status: error.status },
+      );
+    }
+    console.error("PATCH /api/admin/orders/[id]/payment error:", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/auth/login/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
+import { prisma } from "../../../../../lib/prisma";
+import { loginSchema } from "../../../../../lib/validation/auth";
+import { signToken, setAuthCookie } from "../../../../../lib/auth";
+import {
+  lockMinutesLeft,
+  lockedMessage,
+  registerFailedLogin,
+  clearFailedLogin,
+} from "../../../../../lib/login-limit";
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const parsed = loginSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, message: parsed.error.issues[0].message },
+        { status: 400 },
+      );
+    }
+
+    const { email, password } = parsed.data;
+
+    const customer = await prisma.customer.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        passwordHash: true,
+        isActive: true,
+        failedLoginCount: true,
+        lockedUntil: true,
+      },
+    });
+
+    if (!customer) {
+      return NextResponse.json(
+        { success: false, message: "Email hoặc mật khẩu không đúng" },
+        { status: 401 },
+      );
+    }
+
+    // Đang bị khóa tạm do nhập sai nhiều lần: chặn luôn, không so mật khẩu
+    const minutesLeft = lockMinutesLeft(customer.lockedUntil);
+    if (minutesLeft > 0) {
+      return NextResponse.json(
+        { success: false, message: lockedMessage(minutesLeft) },
+        { status: 429 },
+      );
+    }
+
+    const isValidPassword = await bcrypt.compare(
+      password,
+      customer.passwordHash,
+    );
+
+    if (!isValidPassword) {
+      const result = await registerFailedLogin(prisma, "customer", customer.id);
+
+      if (result.locked) {
+        return NextResponse.json(
+          { success: false, message: lockedMessage(result.minutes) },
+          { status: 429 },
+        );
+      }
+
+      return NextResponse.json(
+        {
+          success: false,
+          message: `Email hoặc mật khẩu không đúng. Bạn còn ${result.remaining} lần thử.`,
+        },
+        { status: 401 },
+      );
+    }
+
+    // Kiểm tra khóa SAU khi mật khẩu đúng, để người lạ đoán email
+    // không biết được tài khoản nào đang bị khóa
+    if (!customer.isActive) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ shop để được hỗ trợ.",
+        },
+        { status: 403 },
+      );
+    }
+
+    // Đăng nhập đúng: xóa bộ đếm sai (chỉ ghi DB khi thật sự có gì để xóa)
+    if (customer.failedLoginCount > 0 || customer.lockedUntil) {
+      await clearFailedLogin(prisma, "customer", customer.id);
+    }
+
+    const token = signToken({ id: customer.id, role: "customer" });
+
+    const response = NextResponse.json({
+      success: true,
+      data: { id: customer.id, name: customer.name, email: customer.email },
+    });
+    setAuthCookie(response, token);
+
+    return response;
+  } catch (error) {
+    console.error("LOGIN_ERROR", error);
+    return NextResponse.json(
+      { success: false, message: "Đã có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+<file path="src/app/api/orders/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "../../../../lib/prisma";
+import { getAuthPayload } from "../../../../lib/auth";
+import { createOrderSchema } from "../../../../lib/validation/order";
+import { cancelExpiredBankOrders } from "../../../../lib/expire-orders";
+import { calcOrderTotals, toVoucherRule } from "../../../../lib/shipping"; // VOUCHER
+import { resolveOrderVouchers } from "../../../../lib/vouchers"; // VOUCHER
+import { logStockMovement } from "../../../../lib/stock"; // STOCK
+
+// Lỗi nghiệp vụ có status HTTP riêng (khác lỗi hệ thống 500)
+class OrderError extends Error {
+  status: number;
+  field?: "discountCode" | "shippingCode"; // VOUCHER: lỗi thuộc ô mã nào
+  constructor(
+    message: string,
+    status = 400,
+    field?: "discountCode" | "shippingCode",
+  ) {
+    super(message);
+    this.status = status;
+    this.field = field;
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    // 1. Xác thực — customerId LẤY TỪ TOKEN, không nhận từ body client
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "customer") {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập để đặt hàng" },
+        { status: 401 },
+      );
+    }
+
+    // Hủy các đơn chuyển khoản quá hạn trước để hoàn kho (và hoàn lượt dùng mã),
+    // rồi mới kiểm tra cho đơn này. Lỗi ở bước này không được chặn việc đặt hàng.
+    await cancelExpiredBankOrders().catch((e) =>
+      console.error("cancelExpiredBankOrders (POST /api/orders):", e),
+    );
+
+    // 2. Validate body
+    const body = await request.json();
+    const parsed = createOrderSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Dữ liệu đơn hàng không hợp lệ",
+          errors: parsed.error.flatten().fieldErrors,
+        },
+        { status: 400 },
+      );
+    }
+    const input = parsed.data;
+
+    // 3. Lấy thông tin sản phẩm thật từ DB (KHÔNG tin giá/tên client gửi lên)
+    const productIds = input.items.map((item) => item.productId);
+    const products = await prisma.product.findMany({
+      where: { id: { in: productIds }, isActive: true },
+    });
+    const productMap = new Map(products.map((p) => [p.id, p]));
+
+    for (const item of input.items) {
+      const product = productMap.get(item.productId);
+      if (!product) {
+        throw new OrderError(
+          `Sản phẩm id=${item.productId} không tồn tại hoặc đã ngừng bán`,
+        );
+      }
+      if (product.stock < item.quantity) {
+        throw new OrderError(
+          `Sản phẩm "${product.name}" chỉ còn ${product.stock} trong kho`,
+        );
+      }
+    }
+
+    // VOUCHER: tiền hàng tính từ giá trong DB
+    const subtotal = input.items.reduce(
+      (sum, item) =>
+        sum + Number(productMap.get(item.productId)!.price) * item.quantity,
+      0,
+    );
+
+    // 4. Transaction: kiểm tra voucher, trừ tồn kho, tạo Order + OrderItem
+    const order = await prisma.$transaction(async (tx) => {
+      // VOUCHER: kiểm tra 2 ô mã ngay trong transaction
+      const vouchers = await resolveOrderVouchers(tx, {
+        discountCode: input.discountCode,
+        shippingCode: input.shippingCode,
+        customerId: payload.id,
+        subtotal,
+      });
+      if (vouchers.ok === false) {
+        throw new OrderError(vouchers.message, 400, vouchers.field);
+      }
+
+      const totals = calcOrderTotals({
+        subtotal,
+        discountVoucher: vouchers.discountVoucher
+          ? toVoucherRule(vouchers.discountVoucher)
+          : null,
+        shippingVoucher: vouchers.shippingVoucher
+          ? toVoucherRule(vouchers.shippingVoucher)
+          : null,
+      });
+
+      // Trừ kho từng sản phẩm, điều kiện stock >= quantity ngay trong câu
+      // update để tránh race condition (2 người đặt cùng lúc, hàng còn ít)
+      for (const item of input.items) {
+        const result = await tx.product.updateMany({
+          where: { id: item.productId, stock: { gte: item.quantity } },
+          data: { stock: { decrement: item.quantity } },
+        });
+        if (result.count === 0) {
+          const product = productMap.get(item.productId);
+          throw new OrderError(
+            `Sản phẩm "${product?.name ?? item.productId}" vừa hết hàng, vui lòng thử lại`,
+          );
+        }
+      }
+
+      const created = await tx.order.create({
+        data: {
+          customerId: payload.id,
+          customerName: input.customerName,
+          phone: input.phone,
+          address: input.address,
+          paymentMethod: input.paymentMethod,
+          // VOUCHER: các khoản tiền "đóng băng" tại lúc đặt
+          shippingFee: totals.shippingFee,
+          discountAmount: totals.discountAmount,
+          shippingDiscount: totals.shippingDiscount,
+          discountVoucherId: vouchers.discountVoucher?.id ?? null,
+          shippingVoucherId: vouchers.shippingVoucher?.id ?? null,
+          orderItems: {
+            create: input.items.map((item) => ({
+              productId: item.productId,
+              quantity: item.quantity,
+              // Giá "đóng băng" tại thời điểm đặt hàng, lấy từ DB
+              priceAtOrder: productMap.get(item.productId)!.price,
+            })),
+          },
+        },
+        include: {
+          orderItems: { include: { product: true } },
+        },
+      });
+
+      // STOCK: ghi lịch sử bán ra, cùng transaction với việc trừ kho
+      for (const item of input.items) {
+        await logStockMovement(tx, {
+          productId: item.productId,
+          change: -item.quantity,
+          reason: "sale",
+          orderId: created.id,
+        });
+      }
+
+      return created;
+    });
+
+    return NextResponse.json({ success: true, data: order }, { status: 201 });
+  } catch (error) {
+    if (error instanceof OrderError) {
+      return NextResponse.json(
+        { success: false, message: error.message, field: error.field },
+        { status: error.status },
+      );
+    }
+    console.error("POST /api/orders error:", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+
+// Lịch sử đơn hàng của CHÍNH khách đang đăng nhập
+export async function GET() {
+  try {
+    // customerId lấy từ token, không nhận từ query/body
+    // -> khách không thể xem đơn của người khác
+    const payload = await getAuthPayload();
+    if (!payload || payload.role !== "customer") {
+      return NextResponse.json(
+        { success: false, message: "Bạn cần đăng nhập để xem đơn hàng" },
+        { status: 401 },
+      );
+    }
+
+    // Hủy đơn chuyển khoản quá hạn trước khi trả danh sách,
+    // để khách thấy đúng trạng thái "Đã hủy"
+    await cancelExpiredBankOrders().catch((e) =>
+      console.error("cancelExpiredBankOrders (GET /api/orders):", e),
+    );
+
+    const orders = await prisma.order.findMany({
+      where: { customerId: payload.id },
+      orderBy: { id: "desc" }, // đơn mới nhất lên đầu
+      include: {
+        orderItems: { include: { product: true } },
+      },
+    });
+
+    return NextResponse.json({ success: true, data: orders });
+  } catch (error) {
+    console.error("GET /api/orders error:", error);
+    return NextResponse.json(
+      { success: false, message: "Có lỗi xảy ra, vui lòng thử lại" },
+      { status: 500 },
+    );
+  }
+}
+</file>
+
+</files>

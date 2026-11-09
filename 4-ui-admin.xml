@@ -1,0 +1,5421 @@
+This file is a merged representation of a subset of the codebase, containing specifically included files, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Only files matching these patterns are included: src/app/admin/**
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+src/
+  app/
+    admin/
+      audit/
+        page.tsx
+      custom-requests/
+        page.tsx
+      customers/
+        [id]/
+          page.tsx
+        page.tsx
+      login/
+        page.tsx
+      orders/
+        [id]/
+          invoice/
+            page.tsx
+        page.tsx
+      products/
+        page.tsx
+      reviews/
+        page.tsx
+      stock/
+        page.tsx
+      vouchers/
+        page.tsx
+      page.tsx
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="src/app/admin/custom-requests/page.tsx">
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+
+type Status =
+  | "pending"
+  | "quoted"
+  | "accepted"
+  | "rejected"
+  | "in_progress"
+  | "completed"
+  | "cancelled";
+
+type Req = {
+  id: number;
+  title: string;
+  description: string;
+  quantity: number;
+  budget: number | null;
+  referenceImageUrl: string | null;
+  quotedPrice: number | null;
+  adminNote: string | null;
+  status: Status;
+  createdAt: string;
+  updatedAt: string;
+  customer: {
+    id: number;
+    name: string;
+    email: string;
+    phone: string | null;
+  };
+};
+
+const COLUMNS: {
+  key: string;
+  title: string;
+  hint: string;
+  statuses: Status[];
+  dot: string;
+}[] = [
+  {
+    key: "pending",
+    title: "Chờ báo giá",
+    hint: "Khách vừa gửi, chờ bạn báo giá",
+    statuses: ["pending"],
+    dot: "bg-moss",
+  },
+  {
+    key: "quoted",
+    title: "Chờ khách trả lời",
+    hint: "Đã báo giá, chờ khách đồng ý",
+    statuses: ["quoted"],
+    dot: "bg-ochre",
+  },
+  {
+    key: "doing",
+    title: "Đang thực hiện",
+    hint: "Khách đã đồng ý giá",
+    statuses: ["accepted", "in_progress"],
+    dot: "bg-ink",
+  },
+  {
+    key: "closed",
+    title: "Đã đóng",
+    hint: "Hoàn thành, từ chối hoặc hủy",
+    statuses: ["completed", "rejected", "cancelled"],
+    dot: "bg-ink/30",
+  },
+];
+
+const STATUS_LABEL: Record<Status, string> = {
+  pending: "Chờ báo giá",
+  quoted: "Đã báo giá",
+  accepted: "Khách đã đồng ý",
+  rejected: "Đã từ chối",
+  in_progress: "Đang làm",
+  completed: "Hoàn thành",
+  cancelled: "Khách đã hủy",
+};
+
+const STATUS_BADGE: Record<Status, string> = {
+  pending: "bg-moss/15 text-moss-dark",
+  quoted: "bg-ochre/25 text-ink",
+  accepted: "bg-ink/10 text-ink",
+  rejected: "bg-ink/10 text-ink/70",
+  in_progress: "bg-ink text-white",
+  completed: "bg-emerald-100 text-emerald-800",
+  cancelled: "bg-ink/10 text-ink/70",
+};
+
+function money(n: number) {
+  return `${n.toLocaleString("vi-VN")}đ`;
+}
+
+function shortDate(s: string) {
+  return new Date(s).toLocaleString("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/* ---------- Khối thao tác của một yêu cầu ---------- */
+function RequestActions({ req, onDone }: { req: Req; onDone: () => void }) {
+  const [price, setPrice] = useState(
+    req.quotedPrice != null ? String(req.quotedPrice) : "",
+  );
+  const [note, setNote] = useState(req.adminNote ?? "");
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectNote, setRejectNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function send(body: Record<string, unknown>) {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/custom-requests/${req.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        setError(json?.message ?? "Có lỗi xảy ra, vui lòng thử lại");
+        if (res.status === 409) onDone();
+        return;
+      }
+      onDone();
+    } catch {
+      setError("Không kết nối được máy chủ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function submitQuote() {
+    if (!price || Number(price) <= 0) {
+      setError("Nhập giá báo lớn hơn 0");
+      return;
+    }
+    const body: Record<string, unknown> = {
+      action: "quote",
+      quotedPrice: Number(price),
+    };
+    if (note.trim()) body.adminNote = note.trim();
+    send(body);
+  }
+
+  function submitReject() {
+    if (!rejectNote.trim()) {
+      setError("Nhập lý do từ chối để khách biết");
+      return;
+    }
+    send({ action: "reject", adminNote: rejectNote.trim() });
+  }
+
+  const status = req.status;
+
+  // Trạng thái đã đóng: không còn thao tác
+  if (
+    status === "rejected" ||
+    status === "completed" ||
+    status === "cancelled"
+  ) {
+    return (
+      <p className="text-xs text-ink/60">
+        Yêu cầu này đã đóng, không còn thao tác nào.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {(status === "pending" || status === "quoted") && !rejecting && (
+        <div className="space-y-2">
+          <label className="block text-xs font-medium text-ink/70">
+            {status === "quoted" ? "Báo lại giá (đ)" : "Giá báo cho khách (đ)"}
+          </label>
+          <input
+            inputMode="numeric"
+            value={price ? Number(price).toLocaleString("vi-VN") : ""}
+            onChange={(e) => setPrice(e.target.value.replace(/\D/g, ""))}
+            placeholder="Ví dụ 350.000"
+            className="w-full rounded-lg border border-ink/15 bg-white px-3 py-2 text-sm text-ink outline-none focus:border-moss"
+          />
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={2}
+            placeholder="Ghi chú cho khách (thời gian làm, chất liệu...) - không bắt buộc"
+            className="w-full resize-none rounded-lg border border-ink/15 bg-white px-3 py-2 text-sm text-ink outline-none focus:border-moss"
+          />
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={submitQuote}
+              disabled={busy}
+              className="rounded-full bg-moss px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-moss-dark disabled:opacity-50"
+            >
+              {busy
+                ? "Đang gửi..."
+                : status === "quoted"
+                  ? "Gửi giá mới"
+                  : "Gửi báo giá"}
+            </button>
+            {status === "pending" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setRejecting(true);
+                  setError("");
+                }}
+                disabled={busy}
+                className="rounded-full border border-ink/20 px-4 py-1.5 text-sm font-medium text-ink/80 transition-colors hover:bg-blush disabled:opacity-50"
+              >
+                Từ chối
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {status === "pending" && rejecting && (
+        <div className="space-y-2">
+          <label className="block text-xs font-medium text-ink/70">
+            Lý do từ chối (khách sẽ thấy)
+          </label>
+          <textarea
+            value={rejectNote}
+            onChange={(e) => setRejectNote(e.target.value)}
+            rows={3}
+            placeholder="Ví dụ: Shop chưa làm được loại này..."
+            className="w-full resize-none rounded-lg border border-ink/15 bg-white px-3 py-2 text-sm text-ink outline-none focus:border-moss"
+          />
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={submitReject}
+              disabled={busy}
+              className="rounded-full bg-ink px-4 py-1.5 text-sm font-medium text-white transition-opacity hover:opacity-85 disabled:opacity-50"
+            >
+              {busy ? "Đang gửi..." : "Xác nhận từ chối"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setRejecting(false);
+                setError("");
+              }}
+              disabled={busy}
+              className="rounded-full border border-ink/20 px-4 py-1.5 text-sm font-medium text-ink/80 transition-colors hover:bg-blush disabled:opacity-50"
+            >
+              Quay lại
+            </button>
+          </div>
+        </div>
+      )}
+
+      {status === "accepted" && (
+        <button
+          type="button"
+          onClick={() => send({ action: "start" })}
+          disabled={busy}
+          className="rounded-full bg-moss px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-moss-dark disabled:opacity-50"
+        >
+          {busy ? "Đang xử lý..." : "Bắt đầu làm"}
+        </button>
+      )}
+
+      {status === "in_progress" && (
+        <button
+          type="button"
+          onClick={() => {
+            if (window.confirm("Đánh dấu yêu cầu này đã làm xong?"))
+              send({ action: "complete" });
+          }}
+          disabled={busy}
+          className="rounded-full bg-moss px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-moss-dark disabled:opacity-50"
+        >
+          {busy ? "Đang xử lý..." : "Đánh dấu hoàn thành"}
+        </button>
+      )}
+
+      {status === "quoted" && (
+        <p className="text-xs text-ink/60">
+          Đang chờ khách trả lời. Bạn có thể báo lại giá nếu cần.
+        </p>
+      )}
+
+      {error && <p className="text-xs font-medium text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+/* ---------- Trang ---------- */
+export default function AdminCustomRequestsPage() {
+  const [items, setItems] = useState<Req[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+  const [q, setQ] = useState("");
+  const [openId, setOpenId] = useState<number | null>(null);
+
+  const load = useCallback(async (silent: boolean) => {
+    if (silent) setRefreshing(true);
+    else setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/admin/custom-requests", {
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        setError(json?.message ?? "Không tải được danh sách yêu cầu");
+        return;
+      }
+      setItems(json.data as Req[]);
+    } catch {
+      setError("Không kết nối được máy chủ");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load(false);
+  }, [load]);
+
+  const filtered = useMemo(() => {
+    const key = q.trim().toLowerCase();
+    if (!key) return items;
+    return items.filter(
+      (r) =>
+        `#${r.id}` === key ||
+        r.title.toLowerCase().includes(key) ||
+        r.customer.name.toLowerCase().includes(key) ||
+        r.customer.email.toLowerCase().includes(key),
+    );
+  }, [items, q]);
+
+  const waiting = items.filter((r) => r.status === "pending").length;
+
+  return (
+    <main className="mx-auto max-w-7xl px-4 py-8">
+      {/* Đầu trang */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-moss-dark">
+            Đặt làm theo yêu cầu
+          </p>
+          <h1 className="mt-1 font-heading text-3xl font-semibold text-ink">
+            Yêu cầu của khách
+          </h1>
+          <p className="mt-1 text-sm text-ink/65">
+            {loading
+              ? "Đang tải..."
+              : waiting > 0
+                ? `${waiting} yêu cầu đang chờ bạn báo giá`
+                : "Không có yêu cầu nào đang chờ báo giá"}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Tìm tên món, khách, #mã"
+            className="w-56 rounded-full border border-ink/15 bg-white px-4 py-2 text-sm text-ink outline-none focus:border-moss"
+          />
+          <button
+            type="button"
+            onClick={() => load(true)}
+            disabled={refreshing || loading}
+            className="rounded-full border border-ink/20 px-4 py-2 text-sm font-medium text-ink/80 transition-colors hover:bg-blush disabled:opacity-50"
+          >
+            {refreshing ? "Đang tải..." : "Tải lại"}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}{" "}
+          <Link href="/admin/login" className="font-medium underline">
+            Đăng nhập Admin
+          </Link>
+        </div>
+      )}
+
+      {/* Bảng 4 cột */}
+      <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {COLUMNS.map((col) => {
+          const rows = filtered.filter((r) => col.statuses.includes(r.status));
+          return (
+            <section
+              key={col.key}
+              className="flex min-h-[200px] flex-col rounded-2xl bg-blush/40 p-3"
+            >
+              <header className="mb-3 px-1">
+                <div className="flex items-center gap-2">
+                  <span className={`h-2.5 w-2.5 rounded-full ${col.dot}`} />
+                  <h2 className="font-heading text-base font-semibold text-ink">
+                    {col.title}
+                  </h2>
+                  <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-xs font-medium text-ink/70">
+                    {rows.length}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-ink/60">{col.hint}</p>
+              </header>
+
+              <div className="space-y-3">
+                {loading && (
+                  <div className="h-20 animate-pulse rounded-xl bg-white/70" />
+                )}
+
+                {!loading && rows.length === 0 && (
+                  <p className="rounded-xl border border-dashed border-ink/15 px-3 py-6 text-center text-xs text-ink/60">
+                    Không có yêu cầu
+                  </p>
+                )}
+
+                {rows.map((r) => {
+                  const open = openId === r.id;
+                  return (
+                    <article
+                      key={r.id}
+                      className={`overflow-hidden rounded-xl border bg-card transition-shadow ${
+                        open
+                          ? "border-moss shadow-warm"
+                          : "border-ink/10 hover:shadow-warm"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setOpenId(open ? null : r.id)}
+                        className="block w-full px-3.5 py-3 text-left"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="text-sm font-semibold leading-snug text-ink">
+                            {r.title}
+                          </h3>
+                          <span className="shrink-0 text-xs text-ink/60">
+                            #{r.id}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-ink/70">
+                          {r.customer.name} · {r.quantity} món
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_BADGE[r.status]}`}
+                          >
+                            {STATUS_LABEL[r.status]}
+                          </span>
+                          {r.quotedPrice != null ? (
+                            <span className="text-xs font-semibold text-moss-dark">
+                              {money(r.quotedPrice)}
+                            </span>
+                          ) : r.budget != null ? (
+                            <span className="text-xs text-ink/65">
+                              Ngân sách {money(r.budget)}
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-2 text-[11px] text-ink/55">
+                          Gửi lúc {shortDate(r.createdAt)}
+                        </p>
+                      </button>
+
+                      {open && (
+                        <div className="space-y-4 border-t border-dashed border-ink/15 bg-paper/60 px-3.5 py-3.5">
+                          <div>
+                            <p className="text-xs font-medium text-ink/70">
+                              Mô tả của khách
+                            </p>
+                            <p className="mt-1 whitespace-pre-line text-sm text-ink">
+                              {r.description}
+                            </p>
+                          </div>
+
+                          {r.referenceImageUrl && (
+                            <a
+                              href={r.referenceImageUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={r.referenceImageUrl}
+                                alt={`Ảnh tham khảo của yêu cầu #${r.id}`}
+                                className="h-40 w-full rounded-lg object-cover"
+                              />
+                            </a>
+                          )}
+
+                          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                            <dt className="text-ink/60">Khách</dt>
+                            <dd className="text-ink">{r.customer.name}</dd>
+                            <dt className="text-ink/60">Email</dt>
+                            <dd className="break-all text-ink">
+                              {r.customer.email}
+                            </dd>
+                            {r.customer.phone && (
+                              <>
+                                <dt className="text-ink/60">SĐT</dt>
+                                <dd className="text-ink">{r.customer.phone}</dd>
+                              </>
+                            )}
+                            <dt className="text-ink/60">Ngân sách</dt>
+                            <dd className="text-ink">
+                              {r.budget != null ? money(r.budget) : "Không nêu"}
+                            </dd>
+                            {r.quotedPrice != null && (
+                              <>
+                                <dt className="text-ink/60">Giá đã báo</dt>
+                                <dd className="font-semibold text-moss-dark">
+                                  {money(r.quotedPrice)}
+                                </dd>
+                              </>
+                            )}
+                          </dl>
+
+                          {r.adminNote && (
+                            <div className="rounded-lg bg-ochre/20 px-3 py-2 text-xs text-ink">
+                              <span className="font-medium">
+                                Ghi chú của shop:{" "}
+                              </span>
+                              {r.adminNote}
+                            </div>
+                          )}
+
+                          <RequestActions
+                            key={`${r.id}-${r.status}`}
+                            req={r}
+                            onDone={() => load(true)}
+                          />
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="src/app/admin/customers/[id]/page.tsx">
+"use client";
+
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+
+interface OrderLine {
+  name: string;
+  quantity: number;
+  price: number;
+}
+
+interface CustomerOrder {
+  id: number;
+  status: string;
+  paymentMethod: string;
+  isPaid: boolean;
+  createdAt: string;
+  customerName: string;
+  phone: string;
+  address: string;
+  total: number;
+  items: OrderLine[];
+}
+
+interface CustomerDetail {
+  id: number;
+  name: string;
+  email: string;
+  phone: string | null;
+  isActive: boolean;
+  reviewCount: number;
+  orderCount: number;
+  totalSpent: number;
+  orders: CustomerOrder[];
+}
+
+const money = (n: number) => new Intl.NumberFormat("vi-VN").format(n) + "đ";
+
+const STATUS_LABEL: Record<string, string> = {
+  pending: "Chờ xác nhận",
+  confirmed: "Đã xác nhận",
+  shipped: "Đang giao",
+  completed: "Hoàn thành",
+  cancelled: "Đã hủy",
+};
+
+const STATUS_DOT: Record<string, string> = {
+  pending: "bg-ochre",
+  confirmed: "bg-peach",
+  shipped: "bg-moss",
+  completed: "bg-emerald-500",
+  cancelled: "bg-ink/30",
+};
+
+export default function AdminCustomerDetailPage() {
+  const params = useParams<{ id: string }>();
+  const id = params.id;
+
+  const [customer, setCustomer] = useState<CustomerDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [tempPassword, setTempPassword] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/customers/" + id);
+      if (res.status === 401) {
+        window.location.href = "/admin/login?next=/admin/customers/" + id;
+        return;
+      }
+      if (res.status === 404 || res.status === 400) {
+        setNotFound(true);
+        return;
+      }
+      const json = await res.json();
+      if (!json.success) {
+        setError(json.message ?? "Không tải được thông tin khách hàng");
+        return;
+      }
+      setCustomer(json.data);
+      setError("");
+    } catch {
+      setError("Không kết nối được máy chủ, vui lòng thử lại");
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function runAction(action: "lock" | "unlock" | "reset_password") {
+    if (!customer) return;
+
+    const ask =
+      action === "lock"
+        ? `Khóa tài khoản của ${customer.name}? Khách sẽ không đăng nhập và đặt hàng được nữa.`
+        : action === "unlock"
+          ? `Mở khóa tài khoản của ${customer.name}?`
+          : `Đặt lại mật khẩu cho ${customer.name}? Mật khẩu cũ sẽ không dùng được nữa.`;
+    if (!window.confirm(ask)) return;
+
+    setBusy(true);
+    setError("");
+    setCopied(false);
+    try {
+      const res = await fetch("/api/admin/customers/" + customer.id, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setError(json.message ?? "Không thực hiện được");
+        return;
+      }
+      if (action === "reset_password") {
+        setTempPassword(json.data.tempPassword);
+      } else {
+        setTempPassword("");
+        setCustomer({ ...customer, isActive: json.data.isActive });
+      }
+    } catch {
+      setError("Không kết nối được máy chủ, vui lòng thử lại");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyPassword() {
+    try {
+      await navigator.clipboard.writeText(tempPassword);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <main className="mx-auto max-w-4xl px-4 py-16 text-center text-sm text-ink/50">
+        Đang tải thông tin khách hàng...
+      </main>
+    );
+  }
+
+  if (notFound || !customer) {
+    return (
+      <main className="mx-auto max-w-4xl px-4 py-16 text-center">
+        <p className="font-heading text-2xl text-ink">
+          {notFound ? "Không tìm thấy khách hàng" : "Có lỗi xảy ra"}
+        </p>
+        {error && <p className="mt-2 text-sm text-moss-dark">{error}</p>}
+        <Link
+          href="/admin/customers"
+          className="mt-6 inline-block rounded-full bg-ink px-5 py-2 text-sm text-paper"
+        >
+          Về sổ khách hàng
+        </Link>
+      </main>
+    );
+  }
+
+  return (
+    <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+      <Link
+        href="/admin/customers"
+        className="text-sm text-ink/60 transition hover:text-ink"
+      >
+        ← Sổ khách hàng
+      </Link>
+
+      {/* Dải hồ sơ */}
+      <section className="mt-4 overflow-hidden rounded-3xl bg-ink text-paper shadow-warm-lg">
+        <div className="flex flex-col gap-5 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
+          <div className="flex items-center gap-4">
+            <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-peach font-heading text-3xl text-ink">
+              {customer.name.trim().charAt(0).toUpperCase()}
+            </span>
+            <div className="min-w-0">
+              <h1 className="truncate font-heading text-2xl sm:text-3xl">
+                {customer.name}
+              </h1>
+              <p className="truncate text-sm text-paper/70">{customer.email}</p>
+              <p className="text-sm text-paper/70">
+                {customer.phone ?? "Chưa có số điện thoại"}
+              </p>
+            </div>
+          </div>
+          <span
+            className={
+              "w-fit -rotate-2 rounded-md border-2 border-dashed px-3 py-1 text-xs font-semibold uppercase tracking-widest " +
+              (customer.isActive
+                ? "border-emerald-300 text-emerald-300"
+                : "border-ochre text-ochre")
+            }
+          >
+            {customer.isActive ? "Đang hoạt động" : "Đã bị khóa"}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap gap-3 border-t border-paper/15 bg-paper/5 px-6 py-4 sm:px-8">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => runAction(customer.isActive ? "lock" : "unlock")}
+            className={
+              "rounded-full px-5 py-2 text-sm font-medium transition disabled:opacity-50 " +
+              (customer.isActive
+                ? "bg-ochre text-ink hover:bg-ochre/80"
+                : "bg-moss text-white hover:bg-moss-dark")
+            }
+          >
+            {customer.isActive ? "Khóa tài khoản" : "Mở khóa tài khoản"}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => runAction("reset_password")}
+            className="rounded-full border border-paper/40 px-5 py-2 text-sm text-paper transition hover:border-paper disabled:opacity-50"
+          >
+            Đặt lại mật khẩu
+          </button>
+        </div>
+      </section>
+
+      {error && (
+        <p className="mt-4 rounded-2xl bg-blush px-4 py-3 text-sm text-moss-dark">
+          {error}
+        </p>
+      )}
+
+      {tempPassword && (
+        <section className="mt-4 rounded-3xl border-2 border-dashed border-ochre bg-ochre/15 p-5">
+          <p className="text-sm font-medium text-ink">
+            Mật khẩu tạm của {customer.name}
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <code className="rounded-xl bg-white px-4 py-2 text-lg tracking-widest text-ink">
+              {tempPassword}
+            </code>
+            <button
+              type="button"
+              onClick={copyPassword}
+              className="rounded-full bg-ink px-4 py-2 text-sm text-paper"
+            >
+              {copied ? "Đã chép" : "Chép"}
+            </button>
+          </div>
+          <p className="mt-3 text-xs text-ink/70">
+            Mật khẩu này chỉ hiện một lần, tải lại trang là mất. Hãy gửi cho
+            khách ngay và nhắc khách đổi lại sau khi đăng nhập.
+          </p>
+        </section>
+      )}
+
+      {/* Dải số liệu */}
+      <section className="mt-6 grid grid-cols-3 divide-x divide-ink/10 rounded-3xl bg-card py-5 shadow-warm">
+        <div className="px-4 text-center">
+          <p className="font-heading text-2xl text-ink">
+            {customer.orderCount}
+          </p>
+          <p className="text-xs text-ink/60">Đơn (chưa hủy)</p>
+        </div>
+        <div className="px-4 text-center">
+          <p className="font-heading text-2xl text-ink">
+            {money(customer.totalSpent)}
+          </p>
+          <p className="text-xs text-ink/60">Tổng đã mua</p>
+        </div>
+        <div className="px-4 text-center">
+          <p className="font-heading text-2xl text-ink">
+            {customer.reviewCount}
+          </p>
+          <p className="text-xs text-ink/60">Đánh giá đã viết</p>
+        </div>
+      </section>
+
+      {/* Lịch sử đơn */}
+      <section className="mt-8">
+        <h2 className="font-heading text-xl text-ink">Lịch sử đơn hàng</h2>
+
+        {customer.orders.length === 0 ? (
+          <p className="mt-4 rounded-2xl bg-blush px-4 py-6 text-center text-sm text-ink/60">
+            Khách này chưa đặt đơn nào.
+          </p>
+        ) : (
+          <ol className="mt-5 ml-2 border-l-2 border-dashed border-ink/20">
+            {customer.orders.map((o) => (
+              <li key={o.id} className="relative pb-5 pl-6">
+                <span
+                  className={
+                    "absolute -left-[9px] top-4 h-4 w-4 rounded-full border-2 border-paper " +
+                    (STATUS_DOT[o.status] ?? "bg-ink/30")
+                  }
+                />
+                <details className="group rounded-2xl bg-card shadow-warm">
+                  <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-5 py-4">
+                    <div>
+                      <p className="font-medium text-ink">Mã đơn #{o.id}</p>
+                      <p className="text-xs text-ink/60">
+                        {new Date(o.createdAt).toLocaleString("vi-VN")}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="rounded-full bg-blush px-3 py-1 text-xs text-ink">
+                        {STATUS_LABEL[o.status] ?? o.status}
+                      </span>
+                      <span className="font-medium text-ink">
+                        {money(o.total)}
+                      </span>
+                      <span className="text-ink/40 transition group-open:rotate-180">
+                        ▾
+                      </span>
+                    </div>
+                  </summary>
+
+                  <div className="border-t border-ink/10 px-5 py-4 text-sm">
+                    <ul className="space-y-1">
+                      {o.items.map((it, i) => (
+                        <li key={i} className="flex justify-between gap-3">
+                          <span className="text-ink">
+                            {it.name}{" "}
+                            <span className="text-ink/50">× {it.quantity}</span>
+                          </span>
+                          <span className="text-ink/70">
+                            {money(it.price * it.quantity)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="mt-3 space-y-0.5 text-ink/70">
+                      <p>
+                        Giao tới: {o.customerName}, {o.phone}
+                      </p>
+                      <p>{o.address}</p>
+                      <p>
+                        Thanh toán:{" "}
+                        {o.paymentMethod === "bank_transfer"
+                          ? "Chuyển khoản"
+                          : "Khi nhận hàng (COD)"}
+                        {o.paymentMethod === "bank_transfer" &&
+                          (o.isPaid ? " - đã nhận tiền" : " - chưa nhận tiền")}
+                      </p>
+                    </div>
+                  </div>
+                </details>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+    </main>
+  );
+}
+</file>
+
+<file path="src/app/admin/login/page.tsx">
+"use client";
+
+import { useState, Suspense } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+
+const fieldClass =
+  "w-full rounded-xl border border-ink/15 bg-paper px-4 py-3 text-ink placeholder:text-ink/35 " +
+  "transition focus:border-moss focus:outline-none focus:ring-2 focus:ring-moss/20 " +
+  "[&:-webkit-autofill]:[-webkit-text-fill-color:#33202a] " +
+  "[&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_#fff7f3]";
+
+// Chiếc cúc áo 4 lỗ, màu lấy từ currentColor
+function ButtonShape({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 100 100" aria-hidden className={className}>
+      <circle cx="50" cy="50" r="48" fill="currentColor" />
+      <circle
+        cx="50"
+        cy="50"
+        r="36"
+        fill="none"
+        stroke="#33202a"
+        strokeOpacity="0.1"
+        strokeWidth="3"
+      />
+      <g fill="#33202a" fillOpacity="0.25">
+        <circle cx="40" cy="40" r="5" />
+        <circle cx="60" cy="40" r="5" />
+        <circle cx="40" cy="60" r="5" />
+        <circle cx="60" cy="60" r="5" />
+      </g>
+      <g
+        stroke="#33202a"
+        strokeOpacity="0.3"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+      >
+        <line x1="40" y1="40" x2="60" y2="60" />
+        <line x1="60" y1="40" x2="40" y2="60" />
+      </g>
+    </svg>
+  );
+}
+
+function AdminLoginForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Chỉ chấp nhận quay lại các trang thuộc khu /admin, còn lại về trang tổng quan
+  const rawNext = searchParams.get("next");
+  const next =
+    rawNext && rawNext.startsWith("/admin") && !rawNext.startsWith("//")
+      ? rawNext
+      : "/admin";
+
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/admin/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+
+      if (!data.success) {
+        setError(data.message);
+        return;
+      }
+
+      router.push(next);
+      router.refresh();
+    } catch {
+      setError("Không thể kết nối tới server, vui lòng thử lại");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    // Phủ kín màn hình để che Header/Footer của khu khách
+    <div className="fixed inset-0 z-[60] overflow-y-auto overflow-x-hidden bg-paper text-ink">
+      <style>{`
+        @keyframes admin-bob {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-10px); }
+        }
+        @media (prefers-reduced-motion: no-preference) {
+          .admin-bob { animation: admin-bob 7s ease-in-out infinite; }
+        }
+      `}</style>
+
+      {/* Cúc áo trang trí, màu nhạt để không tranh với form */}
+      <ButtonShape className="admin-bob pointer-events-none absolute -left-16 -top-16 h-56 w-56 text-blush sm:h-72 sm:w-72" />
+      <ButtonShape className="admin-bob pointer-events-none absolute -bottom-20 -right-12 h-64 w-64 text-peach/60 sm:h-80 sm:w-80" />
+      <ButtonShape className="admin-bob pointer-events-none absolute bottom-16 left-[12%] hidden h-14 w-14 text-ochre/70 md:block" />
+
+      <div className="relative flex min-h-full flex-col items-center justify-center px-5 py-10">
+        <div className="relative w-full max-w-md">
+          {/* Nhãn vàng nghiêng đè lên mép trên thẻ */}
+          <span className="absolute -top-4 right-6 z-10 rotate-3 bg-ochre px-4 py-1.5 text-sm font-semibold tracking-wide text-ink shadow-warm">
+            Chỉ dành cho quản trị
+          </span>
+
+          <div className="overflow-hidden rounded-3xl bg-card shadow-warm-lg">
+            {/* Đầu thẻ màu mận */}
+            <div className="relative bg-ink px-8 pb-8 pt-9 text-paper sm:px-10">
+              {/* Đường chỉ khâu dọc theo mép dưới */}
+              <div className="pointer-events-none absolute inset-x-4 bottom-3 border-t-2 border-dashed border-paper/25" />
+
+              <div className="flex items-center gap-3">
+                <span className="font-heading flex h-10 w-10 items-center justify-center rounded-full bg-moss text-lg font-semibold text-white">
+                  C
+                </span>
+                <span className="text-xs font-medium tracking-[0.2em] text-paper/70">
+                  CỎ MAY · HANDMADE
+                </span>
+              </div>
+              <h1 className="font-heading mt-6 text-4xl font-semibold leading-tight">
+                Khu vực quản trị
+              </h1>
+              <p className="mt-2 text-sm text-paper/65">
+                Đăng nhập để quản lý đơn hàng và sản phẩm của shop.
+              </p>
+            </div>
+
+            {/* Form */}
+            <form
+              onSubmit={handleSubmit}
+              className="flex flex-col gap-5 px-8 pb-8 pt-7 sm:px-10 sm:pb-10"
+            >
+              <div>
+                <label
+                  htmlFor="username"
+                  className="mb-1.5 block text-sm font-medium"
+                >
+                  Tên đăng nhập
+                </label>
+                <input
+                  id="username"
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                  autoComplete="username"
+                  className={fieldClass}
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="password"
+                  className="mb-1.5 block text-sm font-medium"
+                >
+                  Mật khẩu
+                </label>
+                <div className="relative">
+                  <input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    autoComplete="current-password"
+                    className={`${fieldClass} pr-16`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute inset-y-0 right-0 px-4 text-sm font-medium text-moss-dark transition-colors hover:text-ink"
+                  >
+                    {showPassword ? "Ẩn" : "Hiện"}
+                  </button>
+                </div>
+              </div>
+
+              {error && (
+                <p
+                  role="alert"
+                  className="rounded-xl border-l-4 border-moss-dark bg-blush px-4 py-3 text-sm text-moss-dark"
+                >
+                  {error}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="mt-1 rounded-full bg-moss py-3.5 font-semibold text-white shadow-warm transition hover:bg-moss-dark disabled:opacity-50"
+              >
+                {loading ? "Đang xử lý..." : "Vào trang quản trị"}
+              </button>
+            </form>
+          </div>
+
+          <div className="mt-6 text-center">
+            <Link
+              href="/"
+              className="text-sm font-medium text-ink/60 underline-offset-4 transition-colors hover:text-ink hover:underline"
+            >
+              ← Về cửa hàng
+            </Link>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function AdminLoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-paper text-ink/60">
+          Đang tải...
+        </div>
+      }
+    >
+      <AdminLoginForm />
+    </Suspense>
+  );
+}
+</file>
+
+<file path="src/app/admin/orders/[id]/invoice/page.tsx">
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { formatVND } from "../../../../../../lib/format";
+
+type OrderItem = {
+  id: number;
+  quantity: number;
+  priceAtOrder: string; // Prisma Decimal -> chuỗi
+  product: { id: number; name: string };
+};
+
+type Order = {
+  id: number;
+  customerName: string;
+  phone: string;
+  address: string;
+  status: string;
+  paymentMethod: string; // "cod" | "bank_transfer"
+  isPaid: boolean;
+  paidAt: string | null;
+  shippingFee?: string;
+  discountAmount?: string;
+  shippingDiscount?: string;
+  createdAt: string;
+  orderItems: OrderItem[];
+};
+
+const paymentLabels: Record<string, string> = {
+  cod: "Thanh toán khi nhận hàng (COD)",
+  bank_transfer: "Chuyển khoản ngân hàng",
+};
+
+// Quy tắc in: chỉ giữ lại tờ hóa đơn, ẩn Header/Footer và các nút
+const PRINT_CSS = `
+@page { size: A4; margin: 12mm; }
+@media print {
+  html, body { height: auto !important; background: #fff !important; }
+  body * { visibility: hidden !important; }
+  #invoice-root { position: static !important; overflow: visible !important; background: #fff !important; }
+  #invoice-sheet, #invoice-sheet * { visibility: visible !important; }
+  #invoice-sheet {
+    position: absolute !important; left: 0; top: 0; width: 100%;
+    margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important;
+  }
+}
+`;
+
+export default function InvoicePage() {
+  const params = useParams<{ id: string }>();
+  const orderId = Number(params.id);
+
+  const [order, setOrder] = useState<Order | null>(null);
+  const [state, setState] = useState<
+    "loading" | "ready" | "notfound" | "login" | "error"
+  >("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const res = await fetch("/api/admin/orders");
+        const json = await res.json();
+        if (cancelled) return;
+
+        if (res.status === 401) {
+          setState("login");
+          return;
+        }
+        if (!res.ok || !json.success) {
+          setState("error");
+          return;
+        }
+
+        const found = (json.data as Order[]).find((o) => o.id === orderId);
+        if (!found) {
+          setState("notfound");
+          return;
+        }
+        setOrder(found);
+        setState("ready");
+      } catch {
+        if (!cancelled) setState("error");
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [orderId]);
+
+  // Che Header/Footer của web khi xem trên màn hình
+  const shell = "fixed inset-0 z-[60] overflow-y-auto bg-neutral-100 px-4 py-8";
+
+  if (state !== "ready" || !order) {
+    return (
+      <div id="invoice-root" className={shell}>
+        <div className="mx-auto max-w-md pt-20 text-center">
+          {state === "loading" && (
+            <p className="text-neutral-600">Đang tải hóa đơn...</p>
+          )}
+          {state === "login" && (
+            <>
+              <p className="text-neutral-700">
+                Bạn cần đăng nhập quản trị để xem hóa đơn.
+              </p>
+              <Link
+                href={`/admin/login?next=/admin/orders/${params.id}/invoice`}
+                className="mt-4 inline-block rounded-lg bg-black px-5 py-2.5 text-white"
+              >
+                Đăng nhập quản trị
+              </Link>
+            </>
+          )}
+          {state === "notfound" && (
+            <>
+              <p className="text-neutral-700">
+                Không tìm thấy đơn hàng #{params.id}.
+              </p>
+              <Link
+                href="/admin/orders"
+                className="mt-4 inline-block rounded-lg bg-black px-5 py-2.5 text-white"
+              >
+                Về danh sách đơn
+              </Link>
+            </>
+          )}
+          {state === "error" && (
+            <p className="text-red-700">
+              Không tải được hóa đơn, vui lòng thử lại.
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const itemsTotal = order.orderItems.reduce(
+    (sum, it) => sum + Number(it.priceAtOrder) * it.quantity,
+    0,
+  );
+  const shipping = Number(order.shippingFee ?? 0);
+  const discount = Number(order.discountAmount ?? 0);
+  const shippingDiscount = Number(order.shippingDiscount ?? 0);
+  const total = Math.max(
+    0,
+    itemsTotal + shipping - discount - shippingDiscount,
+  );
+  const created = new Date(order.createdAt);
+  const cancelled = order.status === "cancelled";
+
+  return (
+    <div id="invoice-root" className={shell}>
+      <style>{PRINT_CSS}</style>
+
+      {/* Thanh công cụ (không in) */}
+      <div className="mx-auto mb-4 flex max-w-[210mm] items-center justify-between gap-3">
+        <Link
+          href="/admin/orders"
+          className="text-sm text-neutral-600 hover:text-black"
+        >
+          ← Về danh sách đơn
+        </Link>
+        <button
+          type="button"
+          onClick={() => window.print()}
+          className="rounded-full bg-black px-6 py-2 text-sm font-medium text-white shadow transition hover:bg-neutral-800"
+        >
+          🖨 In hóa đơn
+        </button>
+      </div>
+
+      {/* Tờ hóa đơn */}
+      <div
+        id="invoice-sheet"
+        className="relative mx-auto max-w-[210mm] bg-white p-8 text-black shadow-md sm:p-12"
+      >
+        {cancelled && (
+          <p
+            aria-hidden
+            className="pointer-events-none absolute right-10 top-40 -rotate-12 rounded-md border-4 border-double border-red-600 px-4 py-1 text-2xl font-bold uppercase tracking-widest text-red-600 opacity-70"
+          >
+            Đã hủy
+          </p>
+        )}
+
+        {/* Đầu hóa đơn */}
+        <header className="flex flex-wrap items-start justify-between gap-4 border-b-2 border-black pb-5">
+          <div>
+            <p className="font-heading text-2xl font-semibold">
+              Cỏ May Handmade
+            </p>
+            <p className="mt-0.5 text-sm text-neutral-600">
+              Đồ thủ công làm tay từng món
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="font-heading text-3xl font-semibold uppercase tracking-wide">
+              Hóa đơn
+            </p>
+            <p className="mt-0.5 text-sm">
+              Số: <span className="font-semibold">#{order.id}</span>
+            </p>
+            <p className="text-sm text-neutral-600">
+              {created.toLocaleDateString("vi-VN")}{" "}
+              {created.toLocaleTimeString("vi-VN", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </p>
+          </div>
+        </header>
+
+        {/* Người nhận + thanh toán */}
+        <section className="mt-5 grid gap-5 text-sm sm:grid-cols-2">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+              Người nhận
+            </p>
+            <p className="mt-1 text-base font-medium">{order.customerName}</p>
+            <p>{order.phone}</p>
+            <p className="mt-1 whitespace-pre-line text-neutral-700">
+              {order.address}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+              Thanh toán
+            </p>
+            <p className="mt-1">
+              {paymentLabels[order.paymentMethod] ?? order.paymentMethod}
+            </p>
+            <p className="mt-1 font-medium">
+              {order.isPaid
+                ? `Đã thanh toán${
+                    order.paidAt
+                      ? ` lúc ${new Date(order.paidAt).toLocaleString("vi-VN")}`
+                      : ""
+                  }`
+                : "Chưa thanh toán"}
+            </p>
+          </div>
+        </section>
+
+        {/* Bảng sản phẩm */}
+        <table className="mt-6 w-full border-collapse text-sm">
+          <thead>
+            <tr className="border-y border-black text-left text-xs uppercase tracking-wider">
+              <th className="w-10 py-2">STT</th>
+              <th className="py-2">Sản phẩm</th>
+              <th className="w-12 py-2 text-right">SL</th>
+              <th className="w-28 py-2 text-right">Đơn giá</th>
+              <th className="w-32 py-2 text-right">Thành tiền</th>
+            </tr>
+          </thead>
+          <tbody>
+            {order.orderItems.map((it, i) => (
+              <tr key={it.id} className="border-b border-neutral-300 align-top">
+                <td className="py-2.5">{i + 1}</td>
+                <td className="py-2.5 pr-3">{it.product.name}</td>
+                <td className="py-2.5 text-right tabular-nums">
+                  {it.quantity}
+                </td>
+                <td className="py-2.5 text-right tabular-nums">
+                  {formatVND(Number(it.priceAtOrder))}
+                </td>
+                <td className="py-2.5 text-right tabular-nums">
+                  {formatVND(Number(it.priceAtOrder) * it.quantity)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {/* Tổng kết tiền */}
+        <dl className="ml-auto mt-4 w-full max-w-xs space-y-1 text-sm">
+          <div className="flex justify-between gap-4">
+            <dt className="text-neutral-600">Tiền hàng</dt>
+            <dd className="tabular-nums">{formatVND(itemsTotal)}</dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-neutral-600">Phí vận chuyển</dt>
+            <dd className="tabular-nums">{formatVND(shipping)}</dd>
+          </div>
+          {discount > 0 && (
+            <div className="flex justify-between gap-4">
+              <dt className="text-neutral-600">Giảm giá đơn hàng</dt>
+              <dd className="tabular-nums">-{formatVND(discount)}</dd>
+            </div>
+          )}
+          {shippingDiscount > 0 && (
+            <div className="flex justify-between gap-4">
+              <dt className="text-neutral-600">Giảm phí vận chuyển</dt>
+              <dd className="tabular-nums">-{formatVND(shippingDiscount)}</dd>
+            </div>
+          )}
+          <div className="flex justify-between gap-4 border-t-2 border-black pt-2 text-base font-semibold">
+            <dt>Tổng cộng</dt>
+            <dd className="tabular-nums">{formatVND(total)}</dd>
+          </div>
+        </dl>
+
+        {/* Chân hóa đơn */}
+        <footer className="mt-10 flex items-end justify-between gap-6 border-t border-neutral-300 pt-5 text-sm">
+          <p className="text-neutral-600">
+            Cảm ơn bạn đã ủng hộ Cỏ May Handmade ♥
+          </p>
+          <div className="w-40 text-center text-neutral-600">
+            <p>Người lập phiếu</p>
+            <p className="mt-12 border-t border-neutral-400 pt-1 text-xs">
+              (Ký, ghi rõ họ tên)
+            </p>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="src/app/admin/reviews/page.tsx">
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import { AnimatePresence, motion } from "motion/react";
+
+type ReviewStatus = "pending" | "approved" | "hidden";
+
+type Review = {
+  id: number;
+  rating: number;
+  comment: string | null;
+  status: ReviewStatus;
+  createdAt: string;
+  customer: { id: number; name: string; email: string };
+  product: {
+    id: number;
+    name: string;
+    imageUrl: string | null;
+    isActive: boolean;
+  };
+};
+
+const COLUMNS: {
+  status: ReviewStatus;
+  title: string;
+  hint: string;
+  accent: string;
+  empty: string;
+}[] = [
+  {
+    status: "pending",
+    title: "Chờ duyệt",
+    hint: "Đọc rồi quyết định hiện hay ẩn",
+    accent: "bg-ochre",
+    empty: "Không còn đánh giá nào chờ duyệt 🎉",
+  },
+  {
+    status: "approved",
+    title: "Đang hiển thị",
+    hint: "Khách xem được ở trang sản phẩm",
+    accent: "bg-emerald-600",
+    empty: "Chưa có đánh giá nào đang hiển thị.",
+  },
+  {
+    status: "hidden",
+    title: "Đã ẩn",
+    hint: "Không hiện với khách",
+    accent: "bg-ink/40",
+    empty: "Chưa ẩn đánh giá nào.",
+  },
+];
+
+// Nút theo cột hiện tại (API vẫn là nơi chốt luật: chỉ approved/hidden)
+const ACTIONS: Record<
+  ReviewStatus,
+  { to: "approved" | "hidden"; label: string; danger?: boolean }[]
+> = {
+  pending: [
+    { to: "approved", label: "Duyệt" },
+    { to: "hidden", label: "Ẩn", danger: true },
+  ],
+  approved: [{ to: "hidden", label: "Ẩn đánh giá", danger: true }],
+  hidden: [{ to: "approved", label: "Hiện lại" }],
+};
+
+function Stars({ value }: { value: number }) {
+  return (
+    <span className="flex gap-0.5" aria-label={`${value} trên 5 sao`}>
+      {[1, 2, 3, 4, 5].map((s) => (
+        <span key={s} className={s <= value ? "text-ochre" : "text-ink/20"}>
+          ★
+        </span>
+      ))}
+    </span>
+  );
+}
+
+export default function AdminReviewsPage() {
+  const [reviews, setReviews] = useState<Review[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [needLogin, setNeedLogin] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setError(null);
+      try {
+        const res = await fetch("/api/admin/reviews");
+        const json = await res.json();
+        if (cancelled) return;
+
+        if (res.ok && json.success) {
+          setReviews(json.data);
+          return;
+        }
+        if (res.status === 401) setNeedLogin(true);
+        setError(json.message ?? "Có lỗi xảy ra, vui lòng thử lại");
+      } catch {
+        if (!cancelled)
+          setError("Không kết nối được máy chủ, vui lòng thử lại");
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
+  async function changeStatus(review: Review, to: "approved" | "hidden") {
+    setBusyId(review.id);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/admin/reviews/${review.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: to }),
+      });
+      const json = await res.json();
+
+      if (res.ok && json.success) {
+        const updated: Review = json.data;
+        setReviews((prev) =>
+          prev === null
+            ? prev
+            : prev.map((r) => (r.id === updated.id ? updated : r)),
+        );
+        return;
+      }
+
+      if (res.status === 401) setNeedLogin(true);
+      setActionError(json.message ?? "Có lỗi xảy ra, vui lòng thử lại");
+    } catch {
+      setActionError("Không kết nối được máy chủ, vui lòng thử lại");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Lọc theo ô tìm kiếm: tên sản phẩm, tên/email khách, nội dung đánh giá
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return reviews ?? [];
+    return (reviews ?? []).filter(
+      (r) =>
+        r.product.name.toLowerCase().includes(q) ||
+        r.customer.name.toLowerCase().includes(q) ||
+        r.customer.email.toLowerCase().includes(q) ||
+        (r.comment ?? "").toLowerCase().includes(q),
+    );
+  }, [reviews, search]);
+
+  if (needLogin) {
+    return (
+      <main className="mx-auto max-w-5xl px-4 py-16 text-center">
+        <h1 className="font-heading text-3xl">Duyệt đánh giá</h1>
+        <p className="mt-3 opacity-70">{error}</p>
+        <Link
+          href="/admin/login?next=/admin/reviews"
+          className="mt-6 inline-block rounded-lg bg-ink px-5 py-2.5 text-paper"
+        >
+          Đăng nhập quản trị
+        </Link>
+      </main>
+    );
+  }
+
+  return (
+    <main className="mx-auto max-w-7xl px-4 py-10">
+      <motion.div
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="flex flex-wrap items-end justify-between gap-3"
+      >
+        <div>
+          <h1 className="font-heading text-3xl sm:text-4xl">Duyệt đánh giá</h1>
+          <p className="mt-1 text-sm text-ink/60">
+            Đánh giá mới của khách nằm ở cột Chờ duyệt cho đến khi bạn quyết
+            định
+          </p>
+        </div>
+
+        <div className="flex gap-2">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="🔍 Sản phẩm, khách, nội dung..."
+            className="w-64 rounded-full border border-ink/20 bg-paper px-4 py-2 text-sm outline-none transition focus:border-ink focus:ring-2 focus:ring-ochre/30"
+          />
+          <button
+            type="button"
+            onClick={() => setReloadKey((k) => k + 1)}
+            className="rounded-full border border-ink/20 px-4 py-2 text-sm transition hover:bg-ink hover:text-paper"
+          >
+            ↻ Tải lại
+          </button>
+        </div>
+      </motion.div>
+
+      {actionError && (
+        <div className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+          {actionError}
+        </div>
+      )}
+
+      {error && <p className="mt-8 text-center text-red-700">{error}</p>}
+
+      {!error && reviews === null && (
+        <div className="mt-8 grid gap-5 lg:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="h-72 animate-pulse rounded-2xl border border-ink/10 bg-card"
+            />
+          ))}
+        </div>
+      )}
+
+      {reviews !== null && (
+        <div className="mt-8 grid items-start gap-5 lg:grid-cols-3">
+          {COLUMNS.map((col) => {
+            const items = visible.filter((r) => r.status === col.status);
+            return (
+              <section
+                key={col.status}
+                className="overflow-hidden rounded-2xl border border-ink/10 bg-card shadow-sm"
+              >
+                <div className={`h-1.5 ${col.accent}`} />
+                <header className="flex items-start justify-between gap-3 px-4 pb-2 pt-4">
+                  <div>
+                    <h2 className="font-heading text-xl font-semibold">
+                      {col.title}
+                    </h2>
+                    <p className="text-xs text-ink/55">{col.hint}</p>
+                  </div>
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-sm font-semibold ${
+                      col.status === "pending" && items.length > 0
+                        ? "bg-ochre text-ink"
+                        : "bg-ink/10 text-ink/70"
+                    }`}
+                  >
+                    {items.length}
+                  </span>
+                </header>
+
+                <ul className="max-h-[70vh] space-y-3 overflow-y-auto p-3">
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    {items.map((r) => (
+                      <motion.li
+                        key={r.id}
+                        layout
+                        initial={{ opacity: 0, y: 16 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        transition={{ duration: 0.3 }}
+                        className="rounded-xl border border-ink/10 bg-paper p-4"
+                      >
+                        {/* Sản phẩm được đánh giá */}
+                        <Link
+                          href={`/products/${r.product.id}`}
+                          target="_blank"
+                          className="flex items-center gap-3"
+                        >
+                          <span className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-card">
+                            {r.product.imageUrl && (
+                              <Image
+                                src={r.product.imageUrl}
+                                alt={r.product.name}
+                                fill
+                                sizes="44px"
+                                className="object-cover"
+                              />
+                            )}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="line-clamp-2 text-sm font-medium leading-snug hover:underline">
+                              {r.product.name}
+                            </span>
+                            {!r.product.isActive && (
+                              <span className="mt-0.5 inline-block rounded bg-ink/10 px-1.5 text-[11px] text-ink/60">
+                                Sản phẩm đang ẩn
+                              </span>
+                            )}
+                          </span>
+                        </Link>
+
+                        {/* Sao + ngày */}
+                        <div className="mt-3 flex items-center justify-between gap-2">
+                          <Stars value={r.rating} />
+                          <span className="text-xs text-ink/50">
+                            {new Date(r.createdAt).toLocaleDateString("vi-VN")}
+                          </span>
+                        </div>
+
+                        {/* Nội dung */}
+                        {r.comment ? (
+                          <p className="mt-2 whitespace-pre-line break-words text-sm leading-relaxed text-ink/80">
+                            {r.comment}
+                          </p>
+                        ) : (
+                          <p className="mt-2 text-sm italic text-ink/45">
+                            Khách chỉ chấm sao, không viết nhận xét.
+                          </p>
+                        )}
+
+                        {/* Người viết */}
+                        <p className="mt-3 truncate text-xs text-ink/55">
+                          {r.customer.name} · {r.customer.email}
+                        </p>
+
+                        {/* Nút xử lý */}
+                        <div className="mt-3 flex flex-wrap justify-end gap-2 border-t border-ink/10 pt-3">
+                          {ACTIONS[r.status].map((a) => (
+                            <motion.button
+                              key={a.to}
+                              type="button"
+                              whileTap={{ scale: 0.95 }}
+                              disabled={busyId === r.id}
+                              onClick={() => changeStatus(r, a.to)}
+                              className={`rounded-full px-4 py-1.5 text-sm font-medium transition disabled:opacity-50 ${
+                                a.danger
+                                  ? "border border-red-700 text-red-700 hover:bg-red-700 hover:text-white"
+                                  : "bg-ink text-paper hover:bg-moss-dark"
+                              }`}
+                            >
+                              {busyId === r.id ? "Đang xử lý..." : a.label}
+                            </motion.button>
+                          ))}
+                        </div>
+                      </motion.li>
+                    ))}
+                  </AnimatePresence>
+
+                  {items.length === 0 && (
+                    <li className="rounded-xl border border-dashed border-ink/20 px-4 py-10 text-center text-sm text-ink/55">
+                      {search ? "Không có đánh giá nào khớp." : col.empty}
+                    </li>
+                  )}
+                </ul>
+              </section>
+            );
+          })}
+        </div>
+      )}
+    </main>
+  );
+}
+</file>
+
+<file path="src/app/admin/stock/page.tsx">
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+
+type Reason = "import" | "sale" | "cancel_restore" | "adjustment";
+
+type Movement = {
+  id: number;
+  productId: number;
+  productName: string;
+  orderId: number | null;
+  change: number;
+  stockAfter: number;
+  reason: Reason;
+  note: string | null;
+  createdAt: string;
+};
+
+const PAGE_SIZE = 20;
+
+const REASON_META: Record<Reason, { label: string; tone: string }> = {
+  import: {
+    label: "Nhập hàng",
+    tone: "border-emerald-300 bg-emerald-50 text-emerald-800",
+  },
+  sale: {
+    label: "Bán ra",
+    tone: "border-stone-300 bg-stone-50 text-stone-700",
+  },
+  cancel_restore: {
+    label: "Hoàn kho",
+    tone: "border-sky-300 bg-sky-50 text-sky-800",
+  },
+  adjustment: {
+    label: "Điều chỉnh",
+    tone: "border-amber-300 bg-amber-50 text-amber-800",
+  },
+};
+
+const FILTERS: { value: Reason | ""; label: string }[] = [
+  { value: "", label: "Tất cả" },
+  { value: "import", label: "Nhập hàng" },
+  { value: "sale", label: "Bán ra" },
+  { value: "cancel_restore", label: "Hoàn kho" },
+  { value: "adjustment", label: "Điều chỉnh" },
+];
+
+async function fetchPage(page: number, reason: Reason | "", q: string) {
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(PAGE_SIZE),
+  });
+  if (reason) params.set("reason", reason);
+  if (q) params.set("q", q);
+
+  const res = await fetch(`/api/admin/stock-movements?${params.toString()}`);
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.success) {
+    throw new Error(json?.message ?? "Không thể tải lịch sử tồn kho");
+  }
+  return json as { data: Movement[]; total: number };
+}
+
+function dayLabel(iso: string) {
+  return new Date(iso).toLocaleDateString("vi-VN", {
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+function timeLabel(iso: string) {
+  return new Date(iso).toLocaleTimeString("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export default function AdminStockPage() {
+  const [items, setItems] = useState<Movement[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [reason, setReason] = useState<Reason | "">("");
+  const [q, setQ] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
+
+  // Bỏ qua kết quả của request cũ nếu người dùng đã đổi bộ lọc
+  const reqId = useRef(0);
+
+  // Gõ xong 0,4 giây mới tìm
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 400);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  // Đổi bộ lọc thì tải lại từ trang 1
+  useEffect(() => {
+    const id = ++reqId.current;
+    setLoading(true);
+    setError(null);
+    fetchPage(1, reason, debouncedQ)
+      .then((r) => {
+        if (id !== reqId.current) return;
+        setItems(r.data);
+        setTotal(r.total);
+        setPage(1);
+      })
+      .catch((e: Error) => {
+        if (id !== reqId.current) return;
+        setError(e.message);
+        setItems([]);
+        setTotal(0);
+      })
+      .finally(() => {
+        if (id === reqId.current) setLoading(false);
+      });
+  }, [reason, debouncedQ]);
+
+  function loadMore() {
+    const id = ++reqId.current;
+    setLoading(true);
+    setError(null);
+    fetchPage(page + 1, reason, debouncedQ)
+      .then((r) => {
+        if (id !== reqId.current) return;
+        setItems((prev) => [...prev, ...r.data]);
+        setTotal(r.total);
+        setPage((p) => p + 1);
+      })
+      .catch((e: Error) => {
+        if (id !== reqId.current) return;
+        setError(e.message);
+      })
+      .finally(() => {
+        if (id === reqId.current) setLoading(false);
+      });
+  }
+
+  // Gom các dòng theo ngày, giữ nguyên thứ tự mới nhất lên đầu
+  const groups: { label: string; rows: Movement[] }[] = [];
+  for (const m of items) {
+    const label = dayLabel(m.createdAt);
+    const last = groups[groups.length - 1];
+    if (last && last.label === label) last.rows.push(m);
+    else groups.push({ label, rows: [m] });
+  }
+
+  return (
+    <main className="mx-auto max-w-3xl px-4 py-10">
+      <header className="mb-6">
+        <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-moss-dark">
+          Quản trị
+        </p>
+        <h1 className="mt-1 font-heading text-3xl font-semibold text-ink">
+          Sổ kho
+        </h1>
+        <p className="mt-1 text-sm text-ink/60">
+          Mọi lần tồn kho tăng hoặc giảm đều được ghi lại ở đây, kèm số tồn sau
+          mỗi lần thay đổi.
+        </p>
+      </header>
+
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap gap-2">
+          {FILTERS.map((f) => (
+            <button
+              key={f.value || "all"}
+              type="button"
+              onClick={() => setReason(f.value)}
+              className={
+                "rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors " +
+                (reason === f.value
+                  ? "bg-ink text-white"
+                  : "bg-blush text-ink/75 hover:text-moss-dark")
+              }
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Tìm theo tên sản phẩm"
+          className="w-full rounded-full border border-peach/60 bg-white px-4 py-2 text-sm text-ink placeholder:text-ink/40 focus:border-moss focus:outline-none sm:w-64"
+        />
+      </div>
+
+      {error && (
+        <p className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+
+      {!loading && !error && items.length === 0 && (
+        <p className="rounded-xl border border-dashed border-peach/60 px-4 py-10 text-center text-sm text-ink/60">
+          Chưa có biến động nào khớp bộ lọc.
+        </p>
+      )}
+
+      <div className="space-y-8">
+        {groups.map((g) => (
+          <section key={g.label}>
+            <h2 className="mb-3 text-sm font-semibold capitalize text-ink/70">
+              {g.label}
+            </h2>
+            <ol className="ml-2 border-l border-peach/60">
+              {g.rows.map((m) => {
+                const meta = REASON_META[m.reason];
+                const up = m.change > 0;
+                return (
+                  <li key={m.id} className="relative pb-4 pl-6 last:pb-0">
+                    <span
+                      aria-hidden
+                      className={
+                        "absolute -left-[5px] top-4 h-2.5 w-2.5 rounded-full " +
+                        (up ? "bg-emerald-600" : "bg-red-500")
+                      }
+                    />
+                    <div className="flex items-start justify-between gap-4 rounded-2xl border border-peach/40 bg-white px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="text-xs text-ink/50">
+                          {timeLabel(m.createdAt)}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setQ(m.productName)}
+                          title="Lọc theo sản phẩm này"
+                          className="mt-0.5 text-left font-medium text-ink hover:text-moss-dark"
+                        >
+                          {m.productName}
+                        </button>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                          <span
+                            className={
+                              "rounded-full border px-2.5 py-0.5 text-xs font-medium " +
+                              meta.tone
+                            }
+                          >
+                            {meta.label}
+                          </span>
+                          {m.orderId && (
+                            <span className="text-xs text-ink/50">
+                              Đơn #{m.orderId}
+                            </span>
+                          )}
+                        </div>
+                        {m.note && (
+                          <p className="mt-1.5 text-xs text-ink/60">{m.note}</p>
+                        )}
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p
+                          className={
+                            "font-heading text-2xl font-semibold tabular-nums " +
+                            (up ? "text-emerald-700" : "text-red-600")
+                          }
+                        >
+                          {up ? "+" : ""}
+                          {m.change}
+                        </p>
+                        <p className="text-xs text-ink/50">
+                          Tồn: {m.stockAfter}
+                        </p>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
+        ))}
+      </div>
+
+      {loading && (
+        <p className="mt-6 text-center text-sm text-ink/50">Đang tải...</p>
+      )}
+
+      {!loading && items.length > 0 && (
+        <div className="mt-8 text-center">
+          <p className="text-xs text-ink/50">
+            Đang hiển thị {items.length} / {total} dòng
+          </p>
+          {items.length < total && (
+            <button
+              type="button"
+              onClick={loadMore}
+              className="mt-3 rounded-full border border-peach/60 bg-white px-5 py-2 text-sm font-medium text-ink hover:bg-blush"
+            >
+              Xem thêm
+            </button>
+          )}
+        </div>
+      )}
+    </main>
+  );
+}
+</file>
+
+<file path="src/app/admin/vouchers/page.tsx">
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+
+type Voucher = {
+  id: number;
+  code: string;
+  description: string | null;
+  type: "discount" | "shipping";
+  discountKind: "percent" | "fixed";
+  value: string | number;
+  maxDiscount: string | number | null;
+  minOrderValue: string | number;
+  startsAt: string | null;
+  expiresAt: string | null;
+  usageLimit: number | null;
+  isActive: boolean;
+  usedCount: number;
+};
+
+type StatusKey = "running" | "upcoming" | "full" | "expired" | "off";
+type FilterKey = "all" | "running" | "upcoming" | "ended" | "off";
+
+const STATUS_META: Record<StatusKey, { label: string; badge: string }> = {
+  running: { label: "Đang chạy", badge: "bg-emerald-100 text-emerald-800" },
+  upcoming: { label: "Sắp bắt đầu", badge: "bg-ochre/30 text-ink" },
+  full: { label: "Hết lượt", badge: "bg-ink/10 text-ink/60" },
+  expired: { label: "Hết hạn", badge: "bg-ink/10 text-ink/60" },
+  off: { label: "Đã tắt", badge: "bg-ink/10 text-ink/60" },
+};
+
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: "all", label: "Tất cả" },
+  { key: "running", label: "Đang chạy" },
+  { key: "upcoming", label: "Sắp bắt đầu" },
+  { key: "ended", label: "Hết hạn / hết lượt" },
+  { key: "off", label: "Đã tắt" },
+];
+
+const money = (n: number) => `${n.toLocaleString("vi-VN")}đ`;
+const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("vi-VN");
+
+function getStatus(v: Voucher): StatusKey {
+  const now = Date.now();
+  if (!v.isActive) return "off";
+  if (v.expiresAt && now > new Date(v.expiresAt).getTime()) return "expired";
+  if (v.startsAt && now < new Date(v.startsAt).getTime()) return "upcoming";
+  if (v.usageLimit !== null && v.usedCount >= v.usageLimit) return "full";
+  return "running";
+}
+
+function matchFilter(status: StatusKey, f: FilterKey) {
+  if (f === "all") return true;
+  if (f === "ended") return status === "expired" || status === "full";
+  return status === f;
+}
+
+// Chữ lớn ở cuống vé: 10% hoặc 20K
+function stubValue(v: Voucher) {
+  const n = Number(v.value);
+  if (v.discountKind === "percent") return `${n}%`;
+  return n % 1000 === 0 ? `${n / 1000}K` : money(n);
+}
+
+// Ngày (yyyy-mm-dd) <-> ISO, theo giờ máy người dùng
+function toDateInput(iso: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const p = (x: number) => String(x).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+const startOfDayISO = (d: string) => new Date(`${d}T00:00:00`).toISOString();
+const endOfDayISO = (d: string) => new Date(`${d}T23:59:59`).toISOString();
+
+type FormState = {
+  code: string;
+  description: string;
+  type: "discount" | "shipping";
+  discountKind: "percent" | "fixed";
+  value: string;
+  maxDiscount: string;
+  minOrderValue: string;
+  startDate: string;
+  endDate: string;
+  usageLimit: string;
+  isActive: boolean;
+};
+
+const EMPTY_FORM: FormState = {
+  code: "",
+  description: "",
+  type: "discount",
+  discountKind: "percent",
+  value: "",
+  maxDiscount: "",
+  minOrderValue: "",
+  startDate: "",
+  endDate: "",
+  usageLimit: "",
+  isActive: true,
+};
+
+function formFromVoucher(v: Voucher): FormState {
+  return {
+    code: v.code,
+    description: v.description ?? "",
+    type: v.type,
+    discountKind: v.discountKind,
+    value: String(Number(v.value)),
+    maxDiscount: v.maxDiscount === null ? "" : String(Number(v.maxDiscount)),
+    minOrderValue: Number(v.minOrderValue)
+      ? String(Number(v.minOrderValue))
+      : "",
+    startDate: toDateInput(v.startsAt),
+    endDate: toDateInput(v.expiresAt),
+    usageLimit: v.usageLimit === null ? "" : String(v.usageLimit),
+    isActive: v.isActive,
+  };
+}
+
+const inputCls =
+  "w-full rounded-xl border border-ink/15 bg-white px-3 py-2 text-sm text-ink outline-none transition focus:border-moss disabled:bg-ink/5 disabled:text-ink/50";
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-sm font-medium text-ink">{label}</span>
+      {children}
+      {hint && <span className="mt-1 block text-xs text-ink/50">{hint}</span>}
+    </label>
+  );
+}
+
+function Segmented<T extends string>({
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange(o.value)}
+          className={`rounded-xl border px-3 py-2 text-sm transition disabled:cursor-not-allowed ${
+            value === o.value
+              ? "border-ink bg-ink text-paper"
+              : "border-ink/15 bg-white text-ink hover:border-ink/40"
+          } ${disabled && value !== o.value ? "opacity-40" : ""}`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export default function AdminVouchersPage() {
+  const [vouchers, setVouchers] = useState<Voucher[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [filter, setFilter] = useState<FilterKey>("all");
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(
+    null,
+  );
+
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editing, setEditing] = useState<Voucher | null>(null);
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [formError, setFormError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/vouchers");
+      const json = await res.json();
+      if (!json.success) {
+        setLoadError(json.message ?? "Không tải được danh sách voucher");
+        return;
+      }
+      setVouchers(json.data);
+      setLoadError("");
+    } catch {
+      setLoadError("Không kết nối được máy chủ");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  function flash(text: string, ok = true) {
+    setNotice({ text, ok });
+    setTimeout(() => setNotice(null), 3000);
+  }
+
+  const counts = useMemo(() => {
+    const c: Record<FilterKey, number> = {
+      all: vouchers.length,
+      running: 0,
+      upcoming: 0,
+      ended: 0,
+      off: 0,
+    };
+    for (const v of vouchers) {
+      const s = getStatus(v);
+      if (s === "running") c.running++;
+      else if (s === "upcoming") c.upcoming++;
+      else if (s === "off") c.off++;
+      else c.ended++;
+    }
+    return c;
+  }, [vouchers]);
+
+  const shown = vouchers.filter((v) => matchFilter(getStatus(v), filter));
+
+  function openCreate() {
+    setEditing(null);
+    setForm(EMPTY_FORM);
+    setFormError("");
+    setDrawerOpen(true);
+  }
+
+  function openEdit(v: Voucher) {
+    setEditing(v);
+    setForm(formFromVoucher(v));
+    setFormError("");
+    setDrawerOpen(true);
+  }
+
+  function set<K extends keyof FormState>(key: K, val: FormState[K]) {
+    setForm((f) => ({ ...f, [key]: val }));
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setFormError("");
+
+    const value = Number(form.value);
+    if (!form.value || !(value > 0))
+      return setFormError("Nhập mức giảm lớn hơn 0");
+    if (form.discountKind === "percent" && value > 100)
+      return setFormError("Giảm theo % không được quá 100");
+    if (!editing && !form.code.trim()) return setFormError("Nhập mã voucher");
+    if (form.startDate && form.endDate && form.endDate < form.startDate)
+      return setFormError("Ngày hết hạn phải sau ngày bắt đầu");
+
+    const isPercent = form.discountKind === "percent";
+    let url = "/api/admin/vouchers";
+    let method = "POST";
+    let body: Record<string, unknown>;
+
+    if (editing) {
+      url = `/api/admin/vouchers/${editing.id}`;
+      method = "PATCH";
+      // Khi sửa: ô để trống nghĩa là xóa giá trị đó, nên gửi null
+      body = {
+        description: form.description.trim(),
+        value,
+        minOrderValue: form.minOrderValue ? Number(form.minOrderValue) : 0,
+        startsAt: form.startDate ? startOfDayISO(form.startDate) : null,
+        expiresAt: form.endDate ? endOfDayISO(form.endDate) : null,
+        usageLimit: form.usageLimit ? Number(form.usageLimit) : null,
+        isActive: form.isActive,
+        ...(isPercent && {
+          maxDiscount: form.maxDiscount ? Number(form.maxDiscount) : null,
+        }),
+      };
+    } else {
+      // Khi tạo: ô để trống thì không gửi
+      body = {
+        code: form.code.trim().toUpperCase(),
+        type: form.type,
+        discountKind: form.discountKind,
+        value,
+        isActive: form.isActive,
+        ...(form.description.trim() && {
+          description: form.description.trim(),
+        }),
+        ...(isPercent &&
+          form.maxDiscount && { maxDiscount: Number(form.maxDiscount) }),
+        ...(form.minOrderValue && {
+          minOrderValue: Number(form.minOrderValue),
+        }),
+        ...(form.startDate && { startsAt: startOfDayISO(form.startDate) }),
+        ...(form.endDate && { expiresAt: endOfDayISO(form.endDate) }),
+        ...(form.usageLimit && { usageLimit: Number(form.usageLimit) }),
+      };
+    }
+
+    setSaving(true);
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setFormError(json.message ?? "Không lưu được voucher");
+        return;
+      }
+      setDrawerOpen(false);
+      flash(editing ? "Đã cập nhật voucher" : "Đã tạo voucher mới");
+      await load();
+    } catch {
+      setFormError("Không kết nối được máy chủ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggle(v: Voucher) {
+    if (busyId !== null) return;
+    setBusyId(v.id);
+    try {
+      const res = await fetch(`/api/admin/vouchers/${v.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: !v.isActive }),
+      });
+      const json = await res.json();
+      if (!json.success)
+        return flash(json.message ?? "Không đổi được trạng thái", false);
+      flash(v.isActive ? `Đã tắt ${v.code}` : `Đã bật ${v.code}`);
+      await load();
+    } catch {
+      flash("Không kết nối được máy chủ", false);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function remove(v: Voucher) {
+    if (busyId !== null) return;
+    if (
+      !window.confirm(
+        `Xóa voucher ${v.code}? Thao tác này không hoàn tác được.`,
+      )
+    )
+      return;
+    setBusyId(v.id);
+    try {
+      const res = await fetch(`/api/admin/vouchers/${v.id}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (!json.success)
+        return flash(json.message ?? "Không xóa được voucher", false);
+      flash(`Đã xóa ${v.code}`);
+      await load();
+    } catch {
+      flash("Không kết nối được máy chủ", false);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="font-heading text-3xl text-ink sm:text-4xl">
+            Mã giảm giá
+          </h1>
+          <p className="mt-1 text-sm text-ink/60">
+            {counts.running} đang chạy trên tổng {counts.all} voucher
+          </p>
+        </div>
+        <button
+          onClick={openCreate}
+          className="rounded-full bg-moss px-5 py-2.5 text-sm font-semibold text-white shadow-warm transition hover:bg-moss-dark"
+        >
+          + Tạo voucher
+        </button>
+      </div>
+
+      <div className="mt-6 flex flex-wrap gap-2">
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setFilter(f.key)}
+            className={`rounded-full px-4 py-1.5 text-sm transition ${
+              filter === f.key
+                ? "bg-ink text-paper"
+                : "bg-white text-ink/70 ring-1 ring-ink/10 hover:text-ink"
+            }`}
+          >
+            {f.label}
+            <span
+              className={`ml-1.5 text-xs ${filter === f.key ? "text-paper/60" : "text-ink/40"}`}
+            >
+              {counts[f.key]}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <AnimatePresence>
+        {notice && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className={`mt-4 rounded-xl px-4 py-2.5 text-sm ${
+              notice.ok
+                ? "bg-emerald-50 text-emerald-800"
+                : "bg-red-50 text-red-700"
+            }`}
+          >
+            {notice.text}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {loadError && (
+        <p className="mt-6 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+          {loadError}
+        </p>
+      )}
+
+      <div className="mt-6 space-y-4">
+        {loading && (
+          <p className="py-12 text-center text-sm text-ink/50">
+            Đang tải voucher...
+          </p>
+        )}
+
+        {!loading && !loadError && shown.length === 0 && (
+          <p className="rounded-2xl border border-dashed border-ink/20 py-14 text-center text-sm text-ink/50">
+            {vouchers.length === 0
+              ? 'Chưa có voucher nào. Bấm "Tạo voucher" để thêm.'
+              : "Không có voucher nào ở mục này."}
+          </p>
+        )}
+
+        {shown.map((v) => {
+          const status = getStatus(v);
+          const meta = STATUS_META[status];
+          const live = status === "running";
+          const pct =
+            v.usageLimit !== null && v.usageLimit > 0
+              ? Math.min(100, Math.round((v.usedCount / v.usageLimit) * 100))
+              : 0;
+          const busy = busyId === v.id;
+
+          return (
+            <motion.article
+              key={v.id}
+              layout
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="relative flex overflow-hidden rounded-2xl bg-white shadow-warm"
+            >
+              {/* Cuống vé */}
+              <div
+                className={`flex w-32 shrink-0 flex-col items-center justify-center px-2 py-5 text-center ${
+                  live ? "bg-ink text-paper" : "bg-ink/10 text-ink/40"
+                }`}
+              >
+                <span className="font-heading text-3xl leading-none">
+                  {stubValue(v)}
+                </span>
+                <span className="mt-2 text-[11px] leading-tight opacity-80">
+                  {v.type === "discount" ? "Giảm tiền hàng" : "Giảm phí ship"}
+                </span>
+              </div>
+
+              {/* Khuyết tròn ở đường xé */}
+              <span className="absolute -top-3 left-[116px] h-6 w-6 rounded-full bg-paper" />
+              <span className="absolute -bottom-3 left-[116px] h-6 w-6 rounded-full bg-paper" />
+
+              {/* Thân vé */}
+              <div className="flex min-w-0 flex-1 flex-col gap-3 border-l-2 border-dashed border-ink/15 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="font-mono text-lg font-bold tracking-wider text-ink">
+                      {v.code}
+                    </h2>
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${meta.badge}`}
+                    >
+                      {meta.label}
+                    </span>
+                  </div>
+                  {v.description && (
+                    <p className="mt-1 text-sm text-ink/70">{v.description}</p>
+                  )}
+                  <p className="mt-2 text-xs text-ink/55">
+                    {Number(v.minOrderValue) > 0
+                      ? `Đơn từ ${money(Number(v.minOrderValue))}`
+                      : "Mọi đơn hàng"}
+                    {v.maxDiscount !== null &&
+                      ` · Giảm tối đa ${money(Number(v.maxDiscount))}`}
+                    {v.discountKind === "fixed" &&
+                      ` · Giảm ${money(Number(v.value))}`}
+                    {v.startsAt && ` · Từ ${fmtDate(v.startsAt)}`}
+                    {v.expiresAt
+                      ? ` · HSD ${fmtDate(v.expiresAt)}`
+                      : " · Không hạn"}
+                  </p>
+
+                  <div className="mt-3 max-w-xs">
+                    <div className="flex justify-between text-xs text-ink/60">
+                      <span>
+                        Đã dùng {v.usedCount}
+                        {v.usageLimit !== null
+                          ? ` / ${v.usageLimit}`
+                          : " (không giới hạn)"}
+                      </span>
+                      {v.usageLimit !== null && <span>{pct}%</span>}
+                    </div>
+                    {v.usageLimit !== null && (
+                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-ink/10">
+                        <div
+                          className={`h-full rounded-full ${pct >= 100 ? "bg-ink/40" : "bg-moss"}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex shrink-0 gap-2 sm:flex-col">
+                  <button
+                    onClick={() => openEdit(v)}
+                    disabled={busy}
+                    className="rounded-full border border-ink/20 px-4 py-1.5 text-sm text-ink transition hover:border-ink disabled:opacity-50"
+                  >
+                    Sửa
+                  </button>
+                  <button
+                    onClick={() => toggle(v)}
+                    disabled={busy}
+                    className="rounded-full border border-ink/20 px-4 py-1.5 text-sm text-ink transition hover:border-ink disabled:opacity-50"
+                  >
+                    {v.isActive ? "Tắt" : "Bật"}
+                  </button>
+                  <button
+                    onClick={() => remove(v)}
+                    disabled={busy}
+                    className="rounded-full px-4 py-1.5 text-sm text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                  >
+                    Xóa
+                  </button>
+                </div>
+              </div>
+            </motion.article>
+          );
+        })}
+      </div>
+
+      {/* Ngăn kéo tạo / sửa */}
+      <AnimatePresence>
+        {drawerOpen && (
+          <>
+            <motion.div
+              className="fixed inset-0 z-[70] bg-ink/40"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !saving && setDrawerOpen(false)}
+            />
+            <motion.aside
+              className="fixed inset-y-0 right-0 z-[70] flex w-full max-w-md flex-col bg-paper shadow-warm-lg"
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "tween", duration: 0.25 }}
+            >
+              <div className="flex items-center justify-between border-b border-ink/10 px-6 py-4">
+                <h2 className="font-heading text-xl text-ink">
+                  {editing ? `Sửa ${editing.code}` : "Tạo voucher mới"}
+                </h2>
+                <button
+                  onClick={() => setDrawerOpen(false)}
+                  className="rounded-full px-3 py-1 text-sm text-ink/60 hover:bg-ink/5"
+                >
+                  Đóng
+                </button>
+              </div>
+
+              <form
+                onSubmit={submit}
+                className="flex-1 space-y-5 overflow-y-auto px-6 py-5"
+              >
+                {editing ? (
+                  <p className="rounded-xl bg-blush px-3 py-2 text-xs text-ink/70">
+                    Mã, loại voucher và kiểu giảm không đổi được sau khi tạo.
+                    Muốn đổi thì tạo voucher mới.
+                  </p>
+                ) : (
+                  <Field
+                    label="Mã voucher"
+                    hint="Tự động viết hoa. Khách sẽ nhập đúng mã này ở bước thanh toán."
+                  >
+                    <input
+                      className={`${inputCls} font-mono uppercase tracking-wider`}
+                      value={form.code}
+                      onChange={(e) =>
+                        set("code", e.target.value.toUpperCase())
+                      }
+                      placeholder="VD: GIAM10"
+                    />
+                  </Field>
+                )}
+
+                <Field label="Loại voucher">
+                  <Segmented
+                    value={form.type}
+                    disabled={!!editing}
+                    onChange={(t) => set("type", t)}
+                    options={[
+                      { value: "discount", label: "Giảm tiền hàng" },
+                      { value: "shipping", label: "Giảm phí ship" },
+                    ]}
+                  />
+                </Field>
+
+                <Field label="Kiểu giảm">
+                  <Segmented
+                    value={form.discountKind}
+                    disabled={!!editing}
+                    onChange={(k) => set("discountKind", k)}
+                    options={[
+                      { value: "percent", label: "Theo %" },
+                      { value: "fixed", label: "Số tiền cố định" },
+                    ]}
+                  />
+                </Field>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <Field
+                    label={
+                      form.discountKind === "percent"
+                        ? "Mức giảm (%)"
+                        : "Mức giảm (đ)"
+                    }
+                    hint={
+                      form.type === "shipping" &&
+                      form.discountKind === "percent"
+                        ? "Nhập 100 để miễn phí ship"
+                        : undefined
+                    }
+                  >
+                    <input
+                      type="number"
+                      min={1}
+                      className={inputCls}
+                      value={form.value}
+                      onChange={(e) => set("value", e.target.value)}
+                    />
+                  </Field>
+                  {form.discountKind === "percent" && (
+                    <Field
+                      label="Giảm tối đa (đ)"
+                      hint="Để trống nếu không giới hạn"
+                    >
+                      <input
+                        type="number"
+                        min={0}
+                        className={inputCls}
+                        value={form.maxDiscount}
+                        onChange={(e) => set("maxDiscount", e.target.value)}
+                      />
+                    </Field>
+                  )}
+                </div>
+
+                <Field
+                  label="Đơn tối thiểu (đ)"
+                  hint="Để trống nếu áp dụng cho mọi đơn"
+                >
+                  <input
+                    type="number"
+                    min={0}
+                    className={inputCls}
+                    value={form.minOrderValue}
+                    onChange={(e) => set("minOrderValue", e.target.value)}
+                  />
+                </Field>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Bắt đầu từ ngày">
+                    <input
+                      type="date"
+                      className={inputCls}
+                      value={form.startDate}
+                      onChange={(e) => set("startDate", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Hết hạn hết ngày">
+                    <input
+                      type="date"
+                      className={inputCls}
+                      value={form.endDate}
+                      onChange={(e) => set("endDate", e.target.value)}
+                    />
+                  </Field>
+                </div>
+
+                <Field
+                  label="Số lượt dùng tối đa"
+                  hint={
+                    editing && editing.usedCount > 0
+                      ? `Đã dùng ${editing.usedCount} lượt, không đặt nhỏ hơn số này. Để trống nếu không giới hạn.`
+                      : "Để trống nếu không giới hạn"
+                  }
+                >
+                  <input
+                    type="number"
+                    min={1}
+                    className={inputCls}
+                    value={form.usageLimit}
+                    onChange={(e) => set("usageLimit", e.target.value)}
+                  />
+                </Field>
+
+                <Field label="Mô tả (hiện cho khách)">
+                  <input
+                    className={inputCls}
+                    maxLength={255}
+                    value={form.description}
+                    onChange={(e) => set("description", e.target.value)}
+                    placeholder="VD: Giảm 10% cho đơn từ 150.000đ"
+                  />
+                </Field>
+
+                <label className="flex items-center gap-2 text-sm text-ink">
+                  <input
+                    type="checkbox"
+                    checked={form.isActive}
+                    onChange={(e) => set("isActive", e.target.checked)}
+                    className="h-4 w-4 accent-[#f4604f]"
+                  />
+                  Bật voucher ngay
+                </label>
+
+                {formError && (
+                  <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {formError}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="w-full rounded-full bg-moss py-3 text-sm font-semibold text-white transition hover:bg-moss-dark disabled:opacity-60"
+                >
+                  {saving
+                    ? "Đang lưu..."
+                    : editing
+                      ? "Lưu thay đổi"
+                      : "Tạo voucher"}
+                </button>
+              </form>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+    </main>
+  );
+}
+</file>
+
+<file path="src/app/admin/page.tsx">
+"use client";
+
+import { useEffect, useState } from "react";
+import { animate, motion } from "motion/react";
+
+type Range = "today" | "7d" | "30d" | "month";
+
+type Stats = {
+  range: Range;
+  summary: {
+    revenue: number;
+    totalOrders: number;
+    completedOrders: number;
+    cancelledOrders: number;
+    inProgressOrders: number;
+    averageOrderValue: number;
+  };
+  daily: { date: string; revenue: number; orders: number; completed: number }[];
+  topProducts: {
+    id: number;
+    name: string;
+    imageUrl: string | null;
+    quantity: number;
+  }[];
+  lowStock: { id: number; name: string; stock: number }[];
+};
+
+const RANGES: { value: Range; label: string }[] = [
+  { value: "today", label: "Hôm nay" },
+  { value: "7d", label: "7 ngày" },
+  { value: "30d", label: "30 ngày" },
+  { value: "month", label: "Tháng này" },
+];
+
+const formatMoney = (n: number) =>
+  new Intl.NumberFormat("vi-VN").format(n) + " ₫";
+
+// "2026-10-01" -> "01/10"
+const formatDay = (key: string) => key.slice(8, 10) + "/" + key.slice(5, 7);
+
+// Số đếm chạy từ 0 lên giá trị thật
+function AnimatedNumber({
+  value,
+  format,
+}: {
+  value: number;
+  format?: (n: number) => string;
+}) {
+  const [display, setDisplay] = useState(0);
+  useEffect(() => {
+    const controls = animate(0, value, {
+      duration: 0.9,
+      ease: "easeOut",
+      onUpdate: (v) => setDisplay(Math.round(v)),
+    });
+    return () => controls.stop();
+  }, [value]);
+  return <>{format ? format(display) : display}</>;
+}
+
+export default function AdminDashboardPage() {
+  const [range, setRange] = useState<Range>("7d");
+  const [data, setData] = useState<Stats | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/admin/stats?range=${range}`)
+      .then(async (res) => {
+        if (res.status === 401) {
+          window.location.href = "/admin/login?next=/admin";
+          return;
+        }
+        const json = await res.json();
+        if (cancelled) return;
+        if (!json.success) {
+          setError(json.message);
+          return;
+        }
+        setError("");
+        setData(json.data);
+      })
+      .catch(() => {
+        if (!cancelled) setError("Không thể kết nối máy chủ");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
+
+  // Đang tải khi chưa có dữ liệu hoặc dữ liệu đang hiện là của kỳ khác
+  const loading = !data || data.range !== range;
+
+  const cards = data
+    ? [
+        {
+          label: "Doanh thu",
+          value: data.summary.revenue,
+          format: formatMoney,
+          icon: "💰",
+          accent: "border-ochre",
+          note: `TB ${formatMoney(data.summary.averageOrderValue)} / đơn`,
+        },
+        {
+          label: "Đơn đã giao",
+          value: data.summary.completedOrders,
+          icon: "✅",
+          accent: "border-moss",
+          note: `Trên tổng ${data.summary.totalOrders} đơn`,
+        },
+        {
+          label: "Đang xử lý",
+          value: data.summary.inProgressOrders,
+          icon: "🚚",
+          accent: "border-ink/40",
+          note: "Chờ xác nhận hoặc đang giao",
+        },
+        {
+          label: "Đã hủy",
+          value: data.summary.cancelledOrders,
+          icon: "❌",
+          accent: "border-red-400",
+          note: "Không tính vào doanh thu",
+        },
+      ]
+    : [];
+
+  const maxRevenue = data
+    ? Math.max(...data.daily.map((d) => d.revenue), 1)
+    : 1;
+  const labelStep = data ? Math.ceil(data.daily.length / 7) : 1;
+  const maxQuantity = data
+    ? Math.max(...data.topProducts.map((p) => p.quantity), 1)
+    : 1;
+  const hasRevenue = data ? data.daily.some((d) => d.revenue > 0) : false;
+
+  return (
+    <main className="mx-auto max-w-6xl px-4 py-8">
+      {/* Tiêu đề + chọn kỳ */}
+      <motion.div
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="mb-6 flex flex-wrap items-center justify-between gap-3"
+      >
+        <div>
+          <h1 className="text-2xl font-semibold text-ink sm:text-3xl">
+            Tổng quan
+          </h1>
+          <p className="mt-1 text-sm text-ink/60">
+            Doanh thu và tình hình đơn hàng của cửa hàng
+          </p>
+        </div>
+
+        <div className="flex gap-1 rounded-full bg-card p-1 shadow-sm">
+          {RANGES.map((r) => (
+            <button
+              key={r.value}
+              onClick={() => setRange(r.value)}
+              className={
+                "rounded-full px-4 py-1.5 text-sm font-medium transition " +
+                (range === r.value
+                  ? "bg-ink text-paper shadow"
+                  : "text-ink/70 hover:bg-ink/5")
+              }
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </motion.div>
+
+      {error && (
+        <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-red-700">
+          {error}
+        </p>
+      )}
+
+      {!data && !error && (
+        <p className="animate-pulse text-ink/60">Đang tải...</p>
+      )}
+
+      {data && (
+        <div
+          className={
+            "transition-opacity duration-300 " +
+            (loading ? "opacity-50" : "opacity-100")
+          }
+        >
+          {/* Thẻ số liệu */}
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {cards.map((c, i) => (
+              <motion.div
+                key={c.label}
+                initial={{ opacity: 0, y: 24 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: i * 0.08 }}
+                whileHover={{ y: -4 }}
+                className={`rounded-xl border-l-4 bg-card p-4 shadow-sm transition-shadow hover:shadow-md ${c.accent}`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-ink/60">{c.label}</span>
+                  <span className="text-lg">{c.icon}</span>
+                </div>
+                <p className="mt-2 text-2xl font-semibold text-ink sm:text-3xl">
+                  <AnimatedNumber value={c.value} format={c.format} />
+                </p>
+                <p className="mt-1 text-xs text-ink/50">{c.note}</p>
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Biểu đồ doanh thu theo ngày */}
+          <motion.section
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.3 }}
+            className="mt-6 rounded-xl border border-ink/10 bg-card p-5 shadow-sm"
+          >
+            <h2 className="text-lg font-semibold text-ink">
+              Doanh thu theo ngày
+            </h2>
+            <p className="text-xs text-ink/50">
+              Chỉ tính đơn đã giao thành công · trỏ chuột vào cột để xem chi
+              tiết
+            </p>
+
+            {!hasRevenue ? (
+              <div className="py-14 text-center">
+                <p className="text-4xl">📉</p>
+                <p className="mt-3 text-ink/70">
+                  Chưa có doanh thu trong khoảng thời gian này.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="mt-6 flex h-52 items-end gap-1 border-b border-ink/15">
+                  {data.daily.map((d, i) => {
+                    const pct = (d.revenue / maxRevenue) * 100;
+                    return (
+                      <div
+                        key={d.date}
+                        className="group relative flex h-full flex-1 items-end"
+                      >
+                        <motion.div
+                          initial={{ height: 0 }}
+                          animate={{
+                            height: d.revenue > 0 ? `${Math.max(pct, 3)}%` : 2,
+                          }}
+                          transition={{
+                            duration: 0.7,
+                            delay: i * 0.02,
+                            ease: [0.22, 1, 0.36, 1],
+                          }}
+                          className={
+                            "w-full rounded-t-md transition-colors " +
+                            (d.revenue > 0
+                              ? "bg-ochre group-hover:bg-ink"
+                              : "bg-ink/10")
+                          }
+                        />
+                        {/* Chú thích khi hover */}
+                        <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden w-max -translate-x-1/2 rounded-lg bg-ink px-3 py-2 text-xs text-paper shadow-lg group-hover:block">
+                          <p className="font-medium">{formatDay(d.date)}</p>
+                          <p>{formatMoney(d.revenue)}</p>
+                          <p className="text-paper/70">
+                            {d.orders} đơn · {d.completed} đã giao
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Nhãn ngày bên dưới */}
+                <div className="mt-2 flex gap-1">
+                  {data.daily.map((d, i) => (
+                    <div
+                      key={d.date}
+                      className="flex-1 text-center text-[10px] text-ink/50"
+                    >
+                      {i % labelStep === 0 ? formatDay(d.date) : ""}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </motion.section>
+
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            {/* Sản phẩm bán chạy */}
+            <motion.section
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.4 }}
+              className="rounded-xl border border-ink/10 bg-card p-5 shadow-sm"
+            >
+              <h2 className="text-lg font-semibold text-ink">
+                Sản phẩm bán chạy
+              </h2>
+              {data.topProducts.length === 0 ? (
+                <p className="mt-4 text-sm text-ink/60">
+                  Chưa có sản phẩm nào được bán.
+                </p>
+              ) : (
+                <ul className="mt-4 space-y-4">
+                  {data.topProducts.map((p, i) => (
+                    <li key={p.id} className="flex items-center gap-3">
+                      <span className="w-5 text-sm font-semibold text-ink/40">
+                        {i + 1}
+                      </span>
+                      {p.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={p.imageUrl}
+                          alt=""
+                          className="h-11 w-11 rounded-xl object-cover shadow-sm"
+                        />
+                      ) : (
+                        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-ink/5 text-ink/30">
+                          —
+                        </span>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <p className="truncate text-sm font-medium text-ink">
+                            {p.name}
+                          </p>
+                          <span className="shrink-0 text-xs text-ink/60">
+                            {p.quantity} đã bán
+                          </span>
+                        </div>
+                        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-ink/10">
+                          <motion.div
+                            initial={{ width: 0 }}
+                            animate={{
+                              width: `${(p.quantity / maxQuantity) * 100}%`,
+                            }}
+                            transition={{ duration: 0.8, delay: 0.5 + i * 0.1 }}
+                            className="h-full rounded-full bg-moss"
+                          />
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </motion.section>
+
+            {/* Cảnh báo sắp hết hàng */}
+            <motion.section
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.5 }}
+              className="rounded-xl border border-ink/10 bg-card p-5 shadow-sm"
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-ink">Sắp hết hàng</h2>
+                <a
+                  href="/admin/products"
+                  className="text-sm text-ink/60 underline-offset-2 hover:text-ink hover:underline"
+                >
+                  Quản lý sản phẩm →
+                </a>
+              </div>
+              {data.lowStock.length === 0 ? (
+                <p className="mt-4 text-sm text-ink/60">
+                  Tất cả sản phẩm đều còn đủ hàng 🎉
+                </p>
+              ) : (
+                <ul className="mt-4 space-y-2">
+                  {data.lowStock.map((p) => (
+                    <li
+                      key={p.id}
+                      className="flex items-center justify-between gap-3 rounded-lg bg-paper px-3 py-2.5"
+                    >
+                      <span className="truncate text-sm text-ink">
+                        {p.name}
+                      </span>
+                      {p.stock <= 0 ? (
+                        <span className="shrink-0 rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700">
+                          Hết hàng
+                        </span>
+                      ) : (
+                        <span className="shrink-0 rounded-full bg-ochre/20 px-2.5 py-1 text-xs font-medium text-ink">
+                          Còn {p.stock}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </motion.section>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}
+</file>
+
+<file path="src/app/admin/audit/page.tsx">
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+
+type Log = {
+  id: number;
+  adminUsername: string;
+  action: string;
+  entityType: string;
+  entityId: number | null;
+  summary: string;
+  createdAt: string;
+};
+
+const CHANNELS = [
+  { key: "", label: "tất-cả" },
+  { key: "order", label: "đơn-hàng" },
+  { key: "product", label: "sản-phẩm" },
+  { key: "customer", label: "khách-hàng" },
+  { key: "voucher", label: "voucher" },
+  { key: "review", label: "đánh-giá" },
+  { key: "custom_request", label: "đặt-làm" },
+];
+
+type Tone = "ok" | "bad" | "info";
+
+const ACTION_META: Record<string, { label: string; tone: Tone }> = {
+  "order.cancel": { label: "HỦY ĐƠN", tone: "bad" },
+  "order.status": { label: "ĐỔI TRẠNG THÁI", tone: "info" },
+  "order.payment": { label: "XÁC NHẬN TIỀN", tone: "ok" },
+  "product.create": { label: "THÊM SP", tone: "ok" },
+  "product.update": { label: "SỬA SP", tone: "info" },
+  "product.hide": { label: "ẨN SP", tone: "bad" },
+  "customer.lock": { label: "KHÓA", tone: "bad" },
+  "customer.unlock": { label: "MỞ KHÓA", tone: "ok" },
+  "customer.reset_password": { label: "ĐẶT LẠI MK", tone: "info" },
+  "voucher.create": { label: "TẠO VOUCHER", tone: "ok" },
+  "voucher.update": { label: "SỬA VOUCHER", tone: "info" },
+  "voucher.toggle": { label: "BẬT/TẮT", tone: "info" },
+  "voucher.delete": { label: "XÓA VOUCHER", tone: "bad" },
+  "review.approve": { label: "DUYỆT", tone: "ok" },
+  "review.hide": { label: "ẨN ĐÁNH GIÁ", tone: "bad" },
+  "custom_request.quote": { label: "BÁO GIÁ", tone: "info" },
+  "custom_request.reject": { label: "TỪ CHỐI YÊU CẦU", tone: "bad" },
+  "custom_request.start": { label: "BẮT ĐẦU LÀM", tone: "info" },
+  "custom_request.complete": { label: "HOÀN THÀNH", tone: "ok" },
+};
+
+const TONE_CLASS: Record<Tone, string> = {
+  ok: "bg-emerald-400/15 text-emerald-300",
+  bad: "bg-moss/25 text-peach",
+  info: "bg-ochre/15 text-ochre",
+};
+
+const TZ = "Asia/Ho_Chi_Minh";
+
+function dayOf(iso: string) {
+  return new Date(iso).toLocaleDateString("vi-VN", { timeZone: TZ });
+}
+
+function timeOf(iso: string) {
+  return new Date(iso).toLocaleTimeString("vi-VN", {
+    timeZone: TZ,
+    hour12: false,
+  });
+}
+
+export default function AdminAuditPage() {
+  const [logs, setLogs] = useState<Log[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const [entityType, setEntityType] = useState("");
+  const [qInput, setQInput] = useState("");
+  const [q, setQ] = useState("");
+
+  const reqId = useRef(0);
+
+  // gõ xong 0,3 giây mới tìm
+  useEffect(() => {
+    const t = setTimeout(() => setQ(qInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [qInput]);
+
+  const fetchPage = useCallback(
+    async (p: number, reset: boolean) => {
+      const id = ++reqId.current;
+      setLoading(true);
+      setError("");
+      try {
+        const params = new URLSearchParams({
+          page: String(p),
+          pageSize: "30",
+        });
+        if (entityType) params.set("entityType", entityType);
+        if (q) params.set("q", q);
+
+        const res = await fetch(`/api/admin/audit-logs?${params.toString()}`);
+        const json = await res.json();
+        if (id !== reqId.current) return;
+
+        if (!json.success) {
+          setError(json.message ?? "Không tải được nhật ký");
+          return;
+        }
+        setLogs((prev) =>
+          reset ? json.data.logs : [...prev, ...json.data.logs],
+        );
+        setTotal(json.data.total);
+        setHasMore(json.data.hasMore);
+        setPage(p);
+      } catch {
+        if (id === reqId.current) setError("Không kết nối được máy chủ");
+      } finally {
+        if (id === reqId.current) setLoading(false);
+      }
+    },
+    [entityType, q],
+  );
+
+  useEffect(() => {
+    fetchPage(1, true);
+  }, [fetchPage]);
+
+  // gom dòng theo ngày
+  const groups: { day: string; items: Log[] }[] = [];
+  for (const log of logs) {
+    const day = dayOf(log.createdAt);
+    const last = groups[groups.length - 1];
+    if (last && last.day === day) last.items.push(log);
+    else groups.push({ day, items: [log] });
+  }
+
+  return (
+    <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+      <header className="mb-6">
+        <p className="text-xs font-semibold uppercase tracking-widest text-moss-dark">
+          Quản trị
+        </p>
+        <h1 className="font-heading text-3xl text-ink">Nhật ký thao tác</h1>
+        <p className="mt-1 text-sm text-ink/60">
+          Mọi thay đổi của Admin được ghi lại tại đây, không sửa hay xóa được.
+        </p>
+      </header>
+
+      <div className="grid gap-4 lg:grid-cols-[200px_1fr]">
+        {/* Thanh kênh */}
+        <nav
+          aria-label="Lọc theo đối tượng"
+          className="flex gap-2 overflow-x-auto pb-1 lg:sticky lg:top-24 lg:flex-col lg:self-start lg:overflow-visible lg:pb-0"
+        >
+          {CHANNELS.map((c) => {
+            const active = entityType === c.key;
+            return (
+              <button
+                key={c.key || "all"}
+                type="button"
+                onClick={() => setEntityType(c.key)}
+                className={`shrink-0 rounded-lg px-3 py-2 text-left font-mono text-sm transition ${
+                  active ? "bg-ink text-paper" : "text-ink/70 hover:bg-blush"
+                }`}
+              >
+                <span className={active ? "text-peach" : "text-moss-dark"}>
+                  #
+                </span>{" "}
+                {c.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Khung console */}
+        <section className="overflow-hidden rounded-xl bg-ink font-mono text-paper shadow-warm-lg">
+          <div className="flex items-center gap-3 border-b border-paper/10 px-4 py-3">
+            <span className="flex gap-1.5" aria-hidden="true">
+              <i className="h-2.5 w-2.5 rounded-full bg-moss" />
+              <i className="h-2.5 w-2.5 rounded-full bg-ochre" />
+              <i className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+            </span>
+            <label className="flex flex-1 items-center gap-2 text-sm">
+              <span className="text-peach">grep ›</span>
+              <input
+                value={qInput}
+                onChange={(e) => setQInput(e.target.value)}
+                placeholder="tên Admin hoặc từ khóa trong nội dung…"
+                className="w-full bg-transparent text-paper placeholder:text-paper/30 focus:outline-none"
+              />
+            </label>
+            <span className="hidden text-xs text-paper/40 sm:inline">
+              {total} dòng
+            </span>
+          </div>
+
+          <div className="max-h-[70vh] overflow-y-auto px-4 py-3 text-sm">
+            {error && (
+              <p className="py-6 text-center text-peach">
+                {error}{" "}
+                <button
+                  type="button"
+                  onClick={() => fetchPage(1, true)}
+                  className="underline"
+                >
+                  thử lại
+                </button>
+              </p>
+            )}
+
+            {!error && loading && logs.length === 0 && (
+              <div className="space-y-3 py-2" aria-hidden="true">
+                {[0, 1, 2, 3, 4, 5].map((i) => (
+                  <div
+                    key={i}
+                    className="h-4 animate-pulse rounded bg-paper/10"
+                    style={{ width: `${95 - i * 9}%` }}
+                  />
+                ))}
+              </div>
+            )}
+
+            {!error && !loading && logs.length === 0 && (
+              <p className="py-10 text-center text-paper/40">
+                — không có dòng nhật ký nào khớp —
+              </p>
+            )}
+
+            {groups.map((g) => (
+              <div key={g.day} className="mb-4">
+                <p className="mb-2 text-xs text-paper/35">
+                  ── {g.day} ──────────────
+                </p>
+                <ul className="space-y-2">
+                  {g.items.map((log) => {
+                    const meta = ACTION_META[log.action] ?? {
+                      label: log.action,
+                      tone: "info" as Tone,
+                    };
+                    return (
+                      <li
+                        key={log.id}
+                        className="flex flex-wrap items-baseline gap-x-3 gap-y-1 leading-relaxed"
+                      >
+                        <span className="text-paper/40">
+                          {timeOf(log.createdAt)}
+                        </span>
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${TONE_CLASS[meta.tone]}`}
+                        >
+                          {meta.label}
+                        </span>
+                        <span className="text-paper/90">{log.summary}</span>
+                        <span className="text-xs text-paper/35">
+                          — {log.adminUsername}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+
+            {hasMore && (
+              <div className="py-3 text-center">
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => fetchPage(page + 1, false)}
+                  className="rounded-md border border-paper/20 px-4 py-1.5 text-xs text-paper/80 transition hover:bg-paper/10 disabled:opacity-50"
+                >
+                  {loading ? "đang tải…" : "↓ xem thêm"}
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="src/app/admin/customers/page.tsx">
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+interface CustomerRow {
+  id: number;
+  name: string;
+  email: string;
+  phone: string | null;
+  isActive: boolean;
+  orderCount: number;
+  totalSpent: number;
+}
+
+type Filter = "all" | "active" | "locked";
+
+const money = (n: number) => new Intl.NumberFormat("vi-VN").format(n) + "đ";
+const normalize = (t: string) => t.normalize("NFC").toLowerCase();
+
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: "all", label: "Tất cả" },
+  { key: "active", label: "Đang hoạt động" },
+  { key: "locked", label: "Đã khóa" },
+];
+
+const LOYAL_ORDERS = 4;
+
+export default function AdminCustomersPage() {
+  const [customers, setCustomers] = useState<CustomerRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/customers");
+      if (res.status === 401) {
+        window.location.href = "/admin/login?next=/admin/customers";
+        return;
+      }
+      const json = await res.json();
+      if (!json.success) {
+        setError(json.message ?? "Không tải được danh sách khách hàng");
+        return;
+      }
+      setCustomers(json.data);
+      setError("");
+    } catch {
+      setError("Không kết nối được máy chủ, vui lòng thử lại");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const counts = useMemo(
+    () => ({
+      all: customers.length,
+      active: customers.filter((c) => c.isActive).length,
+      locked: customers.filter((c) => !c.isActive).length,
+    }),
+    [customers],
+  );
+
+  const totalRevenue = useMemo(
+    () => customers.reduce((sum, c) => sum + c.totalSpent, 0),
+    [customers],
+  );
+
+  const maxSpent = useMemo(
+    () => Math.max(1, ...customers.map((c) => c.totalSpent)),
+    [customers],
+  );
+
+  const visible = useMemo(() => {
+    const q = normalize(query.trim());
+    return customers.filter((c) => {
+      if (filter === "active" && !c.isActive) return false;
+      if (filter === "locked" && c.isActive) return false;
+      if (!q) return true;
+      return (
+        normalize(c.name).includes(q) ||
+        normalize(c.email).includes(q) ||
+        (c.phone ?? "").includes(q)
+      );
+    });
+  }, [customers, query, filter]);
+
+  async function toggleLock(c: CustomerRow) {
+    const action = c.isActive ? "lock" : "unlock";
+    const ask = c.isActive
+      ? `Khóa tài khoản của ${c.name}? Khách sẽ không đăng nhập và đặt hàng được nữa.`
+      : `Mở khóa tài khoản của ${c.name}?`;
+    if (!window.confirm(ask)) return;
+
+    setBusyId(c.id);
+    try {
+      const res = await fetch("/api/admin/customers/" + c.id, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setError(json.message ?? "Không thực hiện được");
+        return;
+      }
+      setError("");
+      setCustomers((list) =>
+        list.map((x) =>
+          x.id === c.id ? { ...x, isActive: json.data.isActive } : x,
+        ),
+      );
+    } catch {
+      setError("Không kết nối được máy chủ, vui lòng thử lại");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+      <p className="text-xs font-semibold uppercase tracking-widest text-moss-dark">
+        Quản trị
+      </p>
+      <h1 className="font-heading text-3xl text-ink sm:text-4xl">
+        Sổ khách hàng
+      </h1>
+
+      <dl className="mt-6 grid grid-cols-2 overflow-hidden rounded-2xl bg-ink text-paper md:grid-cols-4">
+        <div className="border-b border-r border-paper/10 px-5 py-4 md:border-b-0">
+          <dt className="text-xs uppercase tracking-wider text-paper/60">
+            Tổng khách
+          </dt>
+          <dd className="font-heading text-3xl">{counts.all}</dd>
+        </div>
+        <div className="border-b border-paper/10 px-5 py-4 md:border-b-0 md:border-r">
+          <dt className="text-xs uppercase tracking-wider text-paper/60">
+            Đang hoạt động
+          </dt>
+          <dd className="font-heading text-3xl">{counts.active}</dd>
+        </div>
+        <div className="border-r border-paper/10 px-5 py-4">
+          <dt className="text-xs uppercase tracking-wider text-paper/60">
+            Đã khóa
+          </dt>
+          <dd className="font-heading text-3xl text-ochre">{counts.locked}</dd>
+        </div>
+        <div className="px-5 py-4">
+          <dt className="text-xs uppercase tracking-wider text-paper/60">
+            Tổng tiền khách đã mua
+          </dt>
+          <dd className="font-heading text-2xl sm:text-3xl">
+            {money(totalRevenue)}
+          </dd>
+        </div>
+      </dl>
+
+      <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Tìm theo tên, email hoặc số điện thoại"
+          className="w-full rounded-full border border-ink/15 bg-white px-5 py-2.5 text-sm text-ink outline-none focus:border-moss lg:max-w-md"
+        />
+        <div className="flex flex-wrap gap-2">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setFilter(f.key)}
+              className={
+                "rounded-full px-4 py-2 text-sm transition " +
+                (filter === f.key
+                  ? "bg-moss text-white"
+                  : "bg-blush text-ink hover:bg-peach/60")
+              }
+            >
+              {f.label} ({counts[f.key]})
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {error && (
+        <p className="mt-4 rounded-2xl bg-blush px-4 py-3 text-sm text-moss-dark">
+          {error}
+        </p>
+      )}
+
+      {loading ? (
+        <p className="mt-10 text-center text-sm text-ink/50">
+          Đang tải danh sách...
+        </p>
+      ) : visible.length === 0 ? (
+        <p className="mt-10 text-center text-sm text-ink/50">
+          Không có khách hàng nào phù hợp.
+        </p>
+      ) : (
+        <ul className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {visible.map((c) => {
+            const initial = c.name.trim().charAt(0).toUpperCase();
+            const pct = Math.round((c.totalSpent / maxSpent) * 100);
+            const isNew = c.orderCount === 0;
+            const isLoyal = c.orderCount >= LOYAL_ORDERS;
+
+            // Màu chỉ để báo trạng thái, không trang trí
+            const avatarClass = !c.isActive
+              ? "bg-ink/10 text-ink/40"
+              : isLoyal
+                ? "bg-moss text-white"
+                : isNew
+                  ? "bg-paper text-ink/50 ring-1 ring-ink/15"
+                  : "bg-blush text-moss-dark";
+
+            return (
+              <li
+                key={c.id}
+                className={
+                  "flex flex-col rounded-2xl bg-card p-5 ring-1 ring-ink/10 transition hover:-translate-y-0.5 hover:shadow-warm " +
+                  (c.isActive ? "" : "opacity-60")
+                }
+              >
+                <div className="flex items-start gap-4">
+                  <span
+                    className={
+                      "flex h-14 w-14 shrink-0 items-center justify-center rounded-full font-heading text-2xl " +
+                      avatarClass
+                    }
+                  >
+                    {initial}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-heading text-xl text-ink">
+                      {c.name}
+                    </p>
+                    <p className="truncate text-sm text-ink/60">{c.email}</p>
+                    <p className="text-sm text-ink/60">
+                      {c.phone ?? "Chưa có số điện thoại"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-3 min-h-6">
+                  {!c.isActive ? (
+                    <span className="rounded-full bg-ink px-2.5 py-0.5 text-[11px] font-semibold text-paper">
+                      Đã khóa
+                    </span>
+                  ) : isLoyal ? (
+                    <span className="rounded-full bg-ochre/30 px-2.5 py-0.5 text-[11px] font-semibold text-ink">
+                      ★ Khách thân thiết
+                    </span>
+                  ) : isNew ? (
+                    <span className="rounded-full bg-blush px-2.5 py-0.5 text-[11px] font-semibold text-moss-dark">
+                      Mới, chưa có đơn
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="mt-3">
+                  <div className="flex items-baseline justify-between text-sm">
+                    <span className="font-medium text-ink">
+                      {money(c.totalSpent)}
+                    </span>
+                    <span className="text-xs text-ink/50">
+                      {c.orderCount} đơn
+                    </span>
+                  </div>
+                  <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-ink/10">
+                    <div
+                      className="h-full rounded-full bg-moss"
+                      style={{ width: pct + "%" }}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-5 flex gap-2">
+                  <Link
+                    href={"/admin/customers/" + c.id}
+                    className="flex-1 rounded-full bg-blush px-4 py-2 text-center text-sm text-ink transition hover:bg-peach/60"
+                  >
+                    Chi tiết
+                  </Link>
+                  <button
+                    type="button"
+                    disabled={busyId === c.id}
+                    onClick={() => toggleLock(c)}
+                    className={
+                      "flex-1 rounded-full px-4 py-2 text-sm font-medium transition disabled:opacity-50 " +
+                      (c.isActive
+                        ? "border border-ink/20 text-ink hover:border-ink"
+                        : "bg-moss text-white hover:bg-moss-dark")
+                    }
+                  >
+                    {busyId === c.id
+                      ? "Đang xử lý..."
+                      : c.isActive
+                        ? "Khóa"
+                        : "Mở khóa"}
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </main>
+  );
+}
+</file>
+
+<file path="src/app/admin/products/page.tsx">
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { animate, motion } from "motion/react";
+import { productSchema } from "../../../../lib/validation/product";
+
+type Category = { id: number; name: string };
+type Product = {
+  id: number;
+  name: string;
+  description: string | null;
+  price: number;
+  imageUrl: string | null;
+  stock: number;
+  isActive: boolean;
+  categoryId: number;
+  category: Category;
+};
+type FormState = {
+  name: string;
+  description: string;
+  price: string;
+  stock: string;
+  imageUrl: string;
+  categoryId: string;
+};
+
+const emptyForm: FormState = {
+  name: "",
+  description: "",
+  price: "",
+  stock: "0",
+  imageUrl: "",
+  categoryId: "",
+};
+
+// Kho dưới mức này thì cảnh báo "Sắp hết"
+const LOW_STOCK = 10;
+
+const formatPrice = (n: number) =>
+  new Intl.NumberFormat("vi-VN").format(n) + " ₫";
+
+// Số đếm chạy từ 0 lên giá trị thật
+function AnimatedNumber({ value }: { value: number }) {
+  const [display, setDisplay] = useState(0);
+  useEffect(() => {
+    const controls = animate(0, value, {
+      duration: 0.8,
+      ease: "easeOut",
+      onUpdate: (v) => setDisplay(Math.round(v)),
+    });
+    return () => controls.stop();
+  }, [value]);
+  return <>{display}</>;
+}
+
+export default function AdminProductsPage() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  // Bộ lọc
+  const [keyword, setKeyword] = useState("");
+  const [appliedKeyword, setAppliedKeyword] = useState("");
+  const [status, setStatus] = useState("");
+
+  // Form thêm/sửa
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<Product | null>(null);
+  const [form, setForm] = useState<FormState>(emptyForm);
+  const [formError, setFormError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+
+  function goLogin() {
+    window.location.href = "/admin/login?next=/admin/products";
+  }
+
+  const loadProducts = useCallback(async () => {
+    try {
+      const params = new URLSearchParams();
+      if (appliedKeyword) params.set("q", appliedKeyword);
+      if (status) params.set("status", status);
+      const res = await fetch(`/api/admin/products?${params.toString()}`);
+      if (res.status === 401) {
+        goLogin();
+        return;
+      }
+      const json = await res.json();
+      if (!json.success) throw new Error(json.message);
+      setProducts(json.data);
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không thể tải sản phẩm");
+    } finally {
+      setLoading(false);
+    }
+  }, [appliedKeyword, status]);
+
+  useEffect(() => {
+    loadProducts();
+  }, [loadProducts]);
+
+  useEffect(() => {
+    fetch("/api/admin/categories")
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.success) setCategories(json.data);
+      })
+      .catch(() => {});
+  }, []);
+
+  function openCreate() {
+    setEditing(null);
+    setForm(emptyForm);
+    setFormError("");
+    setUploadError("");
+    setShowForm(true);
+  }
+
+  function openEdit(p: Product) {
+    setEditing(p);
+    setForm({
+      name: p.name,
+      description: p.description ?? "",
+      price: String(p.price),
+      stock: String(p.stock),
+      imageUrl: p.imageUrl ?? "",
+      categoryId: String(p.categoryId),
+    });
+    setFormError("");
+    setShowForm(true);
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    setEditing(null);
+  }
+
+  async function handleSubmit(e: React.SyntheticEvent) {
+    e.preventDefault();
+    setFormError("");
+
+    const parsed = productSchema.safeParse(form);
+    if (!parsed.success) {
+      setFormError(parsed.error.issues[0].message);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await fetch(
+        editing ? `/api/admin/products/${editing.id}` : "/api/admin/products",
+        {
+          method: editing ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(parsed.data),
+        },
+      );
+      if (res.status === 401) {
+        goLogin();
+        return;
+      }
+      const json = await res.json();
+      if (!json.success) {
+        setFormError(json.message);
+        return;
+      }
+      closeForm();
+      await loadProducts();
+    } catch {
+      setFormError("Không thể kết nối máy chủ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleActive(p: Product) {
+    if (
+      p.isActive &&
+      !window.confirm(`Ẩn sản phẩm "${p.name}" khỏi cửa hàng?`)
+    ) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/admin/products/${p.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: !p.isActive }),
+      });
+      if (res.status === 401) {
+        goLogin();
+        return;
+      }
+      const json = await res.json();
+      if (!json.success) {
+        setError(json.message);
+        return;
+      }
+      await loadProducts();
+    } catch {
+      setError("Không thể kết nối máy chủ");
+    }
+  }
+
+  function setField(name: keyof FormState, value: string) {
+    setForm((prev) => ({ ...prev, [name]: value }));
+  }
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // cho phép chọn lại đúng file vừa chọn
+    if (!file) return;
+
+    setUploadError("");
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/admin/upload", {
+        method: "POST",
+        body: fd,
+      });
+      if (res.status === 401) {
+        goLogin();
+        return;
+      }
+      const json = await res.json();
+      if (!json.success) {
+        setUploadError(json.message);
+        return;
+      }
+      setField("imageUrl", json.data.url);
+    } catch {
+      setUploadError("Không thể kết nối máy chủ");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  const inputClass =
+    "w-full rounded-lg border border-ink/20 bg-paper px-3 py-2 text-ink outline-none transition focus:border-ink focus:ring-2 focus:ring-ochre/30";
+
+  // Số liệu thống kê (tính theo danh sách đang hiển thị)
+  const stats = [
+    {
+      label: "Tổng sản phẩm",
+      value: products.length,
+      icon: "📦",
+      accent: "border-ink/40",
+    },
+    {
+      label: "Đang bán",
+      value: products.filter((p) => p.isActive).length,
+      icon: "✅",
+      accent: "border-moss",
+    },
+    {
+      label: "Đã ẩn",
+      value: products.filter((p) => !p.isActive).length,
+      icon: "🙈",
+      accent: "border-ink/20",
+    },
+    {
+      label: "Sắp hết hàng",
+      value: products.filter((p) => p.isActive && p.stock < LOW_STOCK).length,
+      icon: "⚠️",
+      accent: "border-ochre",
+    },
+  ];
+
+  return (
+    <main className="mx-auto max-w-6xl px-4 py-8">
+      {/* Tiêu đề */}
+      <motion.div
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="mb-6 flex flex-wrap items-center justify-between gap-3"
+      >
+        <div>
+          <h1 className="text-2xl font-semibold text-ink sm:text-3xl">
+            Quản lý sản phẩm
+          </h1>
+          <p className="mt-1 text-sm text-ink/60">
+            Thêm, chỉnh sửa và ẩn/hiện sản phẩm của cửa hàng
+          </p>
+        </div>
+        <motion.button
+          whileHover={{ scale: 1.04, y: -2 }}
+          whileTap={{ scale: 0.96 }}
+          onClick={openCreate}
+          className="rounded-full bg-ink px-5 py-2.5 font-medium text-paper shadow-md transition-shadow hover:shadow-lg"
+        >
+          + Thêm sản phẩm
+        </motion.button>
+      </motion.div>
+
+      {/* Thẻ thống kê */}
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {stats.map((s, i) => (
+          <motion.div
+            key={s.label}
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: i * 0.08 }}
+            whileHover={{ y: -4 }}
+            className={`rounded-xl border-l-4 bg-card p-4 shadow-sm transition-shadow hover:shadow-md ${s.accent}`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-ink/60">{s.label}</span>
+              <span className="text-lg">{s.icon}</span>
+            </div>
+            <p className="mt-2 text-3xl font-semibold text-ink">
+              <AnimatedNumber value={s.value} />
+            </p>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Bộ lọc: tìm kiếm và trạng thái cùng một hàng */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <form
+          className="flex flex-1 gap-2 sm:max-w-sm"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setAppliedKeyword(keyword.trim());
+          }}
+        >
+          <input
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            placeholder="🔍 Tìm theo tên..."
+            className={inputClass}
+          />
+          <button className="rounded-lg bg-ink px-4 py-2 text-paper transition hover:opacity-90">
+            Tìm
+          </button>
+        </form>
+        <select
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+          className={inputClass + " sm:w-48"}
+        >
+          <option value="">Tất cả trạng thái</option>
+          <option value="active">Đang bán</option>
+          <option value="inactive">Đã ẩn</option>
+        </select>
+      </div>
+
+      {error && (
+        <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-red-700">
+          {error}
+        </p>
+      )}
+
+      {/* Form thêm/sửa */}
+      {showForm && (
+        <motion.form
+          initial={{ opacity: 0, y: -16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          onSubmit={handleSubmit}
+          className="mb-6 grid gap-3 rounded-xl border border-ink/10 bg-card p-5 shadow-md sm:grid-cols-2"
+        >
+          <h2 className="text-lg font-semibold text-ink sm:col-span-2">
+            {editing ? `Sửa sản phẩm #${editing.id}` : "Thêm sản phẩm mới"}
+          </h2>
+
+          <label className="sm:col-span-2">
+            <span className="mb-1 block text-sm text-ink">Tên sản phẩm</span>
+            <input
+              value={form.name}
+              onChange={(e) => setField("name", e.target.value)}
+              className={inputClass}
+            />
+          </label>
+
+          <label>
+            <span className="mb-1 block text-sm text-ink">Giá (₫)</span>
+            <input
+              type="number"
+              min="0"
+              value={form.price}
+              onChange={(e) => setField("price", e.target.value)}
+              className={inputClass}
+            />
+          </label>
+
+          <label>
+            <span className="mb-1 block text-sm text-ink">Tồn kho</span>
+            <input
+              type="number"
+              min="0"
+              value={form.stock}
+              onChange={(e) => setField("stock", e.target.value)}
+              className={inputClass}
+            />
+          </label>
+
+          <label className="sm:col-span-2">
+            <span className="mb-1 block text-sm text-ink">Danh mục</span>
+            <select
+              value={form.categoryId}
+              onChange={(e) => setField("categoryId", e.target.value)}
+              className={inputClass}
+            >
+              <option value="">-- Chọn danh mục --</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="sm:col-span-2">
+            <span className="mb-1 block text-sm text-ink">Ảnh sản phẩm</span>
+            <div className="flex flex-wrap items-center gap-3">
+              {form.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={form.imageUrl}
+                  alt="Xem trước"
+                  className="h-24 w-24 rounded-xl border border-ink/10 object-cover"
+                />
+              ) : (
+                <span className="flex h-24 w-24 items-center justify-center rounded-xl bg-ink/5 text-xs text-ink/40">
+                  Chưa có ảnh
+                </span>
+              )}
+
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="cursor-pointer rounded-lg border border-ink/20 px-4 py-2 text-sm font-medium text-ink transition hover:bg-ink hover:text-paper">
+                    {uploading ? "Đang tải ảnh..." : "Chọn ảnh từ máy"}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={handleFile}
+                      disabled={uploading}
+                      className="hidden"
+                    />
+                  </label>
+                  {form.imageUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setField("imageUrl", "")}
+                      className="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-700 transition hover:bg-red-600 hover:text-white"
+                    >
+                      Bỏ ảnh
+                    </button>
+                  )}
+                </div>
+                <input
+                  value={form.imageUrl}
+                  onChange={(e) => setField("imageUrl", e.target.value)}
+                  placeholder="Hoặc dán đường dẫn: https://... hoặc /images/..."
+                  className={inputClass}
+                />
+                {uploadError && (
+                  <p className="text-sm text-red-700">{uploadError}</p>
+                )}
+                <span className="text-xs text-ink/50">
+                  JPG, PNG hoặc WEBP, tối đa 2MB
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <label className="sm:col-span-2">
+            <span className="mb-1 block text-sm text-ink">Mô tả</span>
+            <textarea
+              rows={3}
+              value={form.description}
+              onChange={(e) => setField("description", e.target.value)}
+              className={inputClass}
+            />
+          </label>
+
+          {formError && (
+            <p className="text-red-700 sm:col-span-2">{formError}</p>
+          )}
+
+          <div className="flex gap-2 sm:col-span-2">
+            <button
+              disabled={saving}
+              className="rounded-lg bg-ink px-5 py-2 text-paper transition hover:opacity-90 disabled:opacity-50"
+            >
+              {saving ? "Đang lưu..." : "Lưu"}
+            </button>
+            <button
+              type="button"
+              onClick={closeForm}
+              className="rounded-lg border border-ink/20 px-5 py-2 text-ink transition hover:bg-ink/5"
+            >
+              Hủy
+            </button>
+          </div>
+        </motion.form>
+      )}
+
+      {/* Danh sách */}
+      {loading ? (
+        <p className="animate-pulse text-ink/60">Đang tải...</p>
+      ) : products.length === 0 ? (
+        <div className="rounded-xl bg-card py-16 text-center">
+          <p className="text-4xl">🔎</p>
+          <p className="mt-3 text-ink/70">Không có sản phẩm nào.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-ink/10 bg-card shadow-sm">
+          <table className="w-full text-left text-sm text-ink">
+            <thead className="bg-ink/5 text-xs uppercase tracking-wider text-ink/60">
+              <tr>
+                <th className="px-4 py-3">ID</th>
+                <th className="px-4 py-3">Ảnh</th>
+                <th className="px-4 py-3">Tên</th>
+                <th className="px-4 py-3">Danh mục</th>
+                <th className="px-4 py-3">Giá</th>
+                <th className="px-4 py-3">Kho</th>
+                <th className="px-4 py-3">Trạng thái</th>
+                <th className="px-4 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {products.map((p, i) => (
+                <motion.tr
+                  key={p.id}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: p.isActive ? 1 : 0.6, y: 0 }}
+                  transition={{ duration: 0.35, delay: Math.min(i, 10) * 0.04 }}
+                  className="border-t border-ink/10 transition-colors hover:bg-ochre/10"
+                >
+                  <td className="px-4 py-3 text-ink/50">#{p.id}</td>
+                  <td className="px-4 py-3">
+                    {p.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={p.imageUrl}
+                        alt=""
+                        className="h-12 w-12 rounded-xl object-cover shadow-sm transition-transform duration-300 hover:scale-125"
+                      />
+                    ) : (
+                      <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-ink/5 text-ink/30">
+                        —
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 font-medium">{p.name}</td>
+                  <td className="px-4 py-3">
+                    <span className="rounded-full bg-ink/5 px-2.5 py-1 text-xs text-ink/70">
+                      {p.category.name}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 font-medium">
+                    {formatPrice(p.price)}
+                  </td>
+                  <td className="px-4 py-3">
+                    {p.stock <= 0 ? (
+                      <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700">
+                        Hết hàng
+                      </span>
+                    ) : p.stock < LOW_STOCK ? (
+                      <span className="rounded-full bg-ochre/20 px-2.5 py-1 text-xs font-medium text-ink">
+                        {p.stock} · Sắp hết
+                      </span>
+                    ) : (
+                      <span>{p.stock}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {p.isActive ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-moss/15 px-2.5 py-1 text-xs font-medium text-moss">
+                        <span className="h-1.5 w-1.5 rounded-full bg-moss" />
+                        Đang bán
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-ink/10 px-2.5 py-1 text-xs font-medium text-ink/60">
+                        <span className="h-1.5 w-1.5 rounded-full bg-ink/40" />
+                        Đã ẩn
+                      </span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    <button
+                      onClick={() => openEdit(p)}
+                      className="mr-2 rounded-lg border border-ink/20 px-3 py-1.5 text-xs font-medium transition hover:bg-ink hover:text-paper"
+                    >
+                      ✏️ Sửa
+                    </button>
+                    <button
+                      onClick={() => toggleActive(p)}
+                      className={
+                        "rounded-lg border px-3 py-1.5 text-xs font-medium transition " +
+                        (p.isActive
+                          ? "border-red-300 text-red-700 hover:bg-red-600 hover:text-white"
+                          : "border-moss/50 text-moss hover:bg-moss hover:text-paper")
+                      }
+                    >
+                      {p.isActive ? "Ẩn" : "Hiện"}
+                    </button>
+                  </td>
+                </motion.tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </main>
+  );
+}
+</file>
+
+<file path="src/app/admin/orders/page.tsx">
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import { AnimatePresence, motion } from "motion/react";
+import { formatVND } from "../../../../lib/format";
+
+type OrderItem = {
+  id: number;
+  quantity: number;
+  priceAtOrder: string; // Prisma Decimal -> chuỗi
+  product: { id: number; name: string; imageUrl: string | null };
+};
+
+type Order = {
+  id: number;
+  customerName: string;
+  phone: string;
+  address: string;
+  status: string;
+  paymentMethod: string; // "cod" | "bank_transfer"
+  isPaid: boolean;
+  paidAt: string | null;
+  shippingFee?: string; // Prisma Decimal -> chuỗi
+  discountAmount?: string;
+  shippingDiscount?: string;
+  createdAt: string;
+  orderItems: OrderItem[];
+};
+
+const statusLabels: Record<string, string> = {
+  pending: "Chờ xác nhận",
+  confirmed: "Đã xác nhận",
+  shipped: "Đang giao",
+  completed: "Hoàn thành",
+  cancelled: "Đã hủy",
+};
+
+const paymentLabels: Record<string, string> = {
+  cod: "Thanh toán khi nhận hàng (COD)",
+  bank_transfer: "Chuyển khoản ngân hàng",
+};
+
+// "unpaid" không phải trạng thái đơn mà là nhãn lọc theo thanh toán
+const filters = [
+  { value: "all", label: "Tất cả" },
+  { value: "unpaid", label: "Chờ nhận tiền" },
+  { value: "pending", label: statusLabels.pending },
+  { value: "confirmed", label: statusLabels.confirmed },
+  { value: "shipped", label: statusLabels.shipped },
+  { value: "completed", label: statusLabels.completed },
+  { value: "cancelled", label: statusLabels.cancelled },
+];
+
+// Màu con dấu theo trạng thái
+const stampStyles: Record<string, string> = {
+  pending: "border-ochre text-ochre",
+  confirmed: "border-sky-700 text-sky-700",
+  shipped: "border-indigo-700 text-indigo-700",
+  completed: "border-moss text-moss",
+  cancelled: "border-red-700 text-red-700",
+};
+
+// Các chặng của đường chỉ khâu
+const STEPS = ["pending", "confirmed", "shipped", "completed"];
+const STEP_LABELS = ["Chờ", "Xác nhận", "Giao hàng", "Hoàn tất"];
+
+// Tự làm mới danh sách đơn sau mỗi khoảng này (mili giây)
+const AUTO_REFRESH_MS = 30_000;
+
+// Nút hiển thị theo trạng thái hiện tại. Phải khớp ALLOWED_TRANSITIONS ở API
+// (API vẫn là nơi chốt luật, đây chỉ để giao diện không hiện nút vô ích).
+const actions: Record<
+  string,
+  { to: string; label: string; danger?: boolean }[]
+> = {
+  pending: [
+    { to: "confirmed", label: "Xác nhận đơn" },
+    { to: "cancelled", label: "Hủy đơn", danger: true },
+  ],
+  confirmed: [
+    { to: "shipped", label: "Giao hàng" },
+    { to: "cancelled", label: "Hủy đơn", danger: true },
+  ],
+  shipped: [{ to: "completed", label: "Hoàn thành" }],
+  completed: [],
+  cancelled: [],
+};
+
+// Tách các khoản tiền của một đơn
+function moneyParts(order: Order) {
+  const items = order.orderItems.reduce(
+    (sum, item) => sum + Number(item.priceAtOrder) * item.quantity,
+    0,
+  );
+  const shipping = Number(order.shippingFee ?? 0);
+  const discount = Number(order.discountAmount ?? 0);
+  const shippingDiscount = Number(order.shippingDiscount ?? 0);
+  return { items, shipping, discount, shippingDiscount };
+}
+
+// Số khách phải trả = tiền hàng + phí ship - giảm giá hàng - giảm ship
+function orderTotal(order: Order) {
+  const m = moneyParts(order);
+  return Math.max(0, m.items + m.shipping - m.discount - m.shippingDiscount);
+}
+
+// Đơn chuyển khoản còn chờ Admin xác nhận đã nhận tiền
+function needsPayment(order: Order) {
+  return (
+    order.paymentMethod === "bank_transfer" &&
+    !order.isPaid &&
+    order.status !== "cancelled"
+  );
+}
+
+// Đường chỉ khâu thể hiện tiến trình đơn; đơn hủy thì "chỉ bị cắt"
+function Stitches({ status }: { status: string }) {
+  const current = STEPS.indexOf(status);
+  const cancelled = status === "cancelled";
+
+  return (
+    <div className="mt-4">
+      <div className="flex items-center">
+        {STEPS.map((step, i) => {
+          const done = !cancelled && i <= current;
+          return (
+            <div key={step} className="flex flex-1 items-center last:flex-none">
+              <motion.span
+                initial={false}
+                animate={{ scale: done && i === current ? 1.3 : 1 }}
+                transition={{ type: "spring", stiffness: 300, damping: 15 }}
+                className={`h-3 w-3 shrink-0 rounded-full border-2 ${
+                  done ? "border-moss bg-moss" : "border-ink/25 bg-card"
+                }`}
+              />
+              {i < STEPS.length - 1 && (
+                <span
+                  className={`mx-1 h-0 flex-1 border-t-2 border-dashed ${
+                    !cancelled && i < current ? "border-moss" : "border-ink/20"
+                  }`}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-1.5 flex justify-between text-[10px] uppercase tracking-wider text-ink/45">
+        {STEP_LABELS.map((label) => (
+          <span key={label}>{label}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function AdminOrdersPage() {
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [orders, setOrders] = useState<Order[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [needLogin, setNeedLogin] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [reloadKey, setReloadKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false); // đang tải ngầm
+  const loadedRef = useRef(false); // đã có dữ liệu ít nhất một lần
+
+  // Tải toàn bộ đơn; lọc theo trạng thái và tìm kiếm làm ở phía client
+  // để các nhãn có số đếm chính xác và đổi bộ lọc không phải chờ.
+  // Lần đầu hiện khung chờ, các lần sau tải ngầm (giữ nguyên danh sách đang xem).
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      const silent = loadedRef.current;
+
+      if (silent) {
+        setRefreshing(true);
+      } else {
+        setOrders(null);
+        setError(null);
+        setActionError(null);
+      }
+
+      try {
+        const res = await fetch("/api/admin/orders");
+        const json = await res.json();
+        if (cancelled) return;
+
+        if (res.ok && json.success) {
+          setOrders(json.data);
+          setError(null);
+          loadedRef.current = true;
+          return;
+        }
+        if (res.status === 401) setNeedLogin(true);
+        // Tải ngầm lỗi thì giữ danh sách cũ, chỉ báo khi hết phiên đăng nhập
+        if (!silent || res.status === 401) {
+          setError(json.message ?? "Có lỗi xảy ra, vui lòng thử lại");
+        }
+      } catch {
+        if (!cancelled && !silent) {
+          setError("Không kết nối được máy chủ, vui lòng thử lại");
+        }
+      } finally {
+        if (!cancelled) setRefreshing(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
+  // Tự làm mới định kỳ, chỉ khi tab đang được xem
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        setReloadKey((k) => k + 1);
+      }
+    }, AUTO_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Thay một đơn trong danh sách bằng bản mới từ server
+  function replaceOrder(updated: Order) {
+    setOrders((prev) =>
+      prev === null
+        ? prev
+        : prev.map((o) => (o.id === updated.id ? updated : o)),
+    );
+  }
+
+  async function changeStatus(order: Order, status: string) {
+    if (
+      status === "cancelled" &&
+      !window.confirm(`Hủy đơn #${order.id}? Hàng sẽ được hoàn lại kho.`)
+    ) {
+      return;
+    }
+
+    setBusyId(order.id);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const json = await res.json();
+
+      if (res.ok && json.success) {
+        replaceOrder(json.data);
+        return;
+      }
+
+      if (res.status === 401) setNeedLogin(true);
+      setActionError(json.message ?? "Có lỗi xảy ra, vui lòng thử lại");
+    } catch {
+      setActionError("Không kết nối được máy chủ, vui lòng thử lại");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Admin xác nhận đã nhận được tiền chuyển khoản của đơn
+  async function confirmPayment(order: Order) {
+    if (
+      !window.confirm(
+        `Xác nhận đã nhận đủ ${formatVND(orderTotal(order))} cho đơn #${order.id}? Thao tác này không hoàn tác được.`,
+      )
+    ) {
+      return;
+    }
+
+    setBusyId(order.id);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/payment`, {
+        method: "PATCH",
+      });
+      const json = await res.json();
+
+      if (res.ok && json.success) {
+        replaceOrder(json.data);
+        return;
+      }
+
+      if (res.status === 401) setNeedLogin(true);
+      setActionError(json.message ?? "Có lỗi xảy ra, vui lòng thử lại");
+    } catch {
+      setActionError("Không kết nối được máy chủ, vui lòng thử lại");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  function toggleExpand(id: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Số đơn theo từng trạng thái (và số đơn chờ nhận tiền) cho các nhãn lọc
+  const counts = useMemo(() => {
+    const result: Record<string, number> = {
+      all: orders?.length ?? 0,
+      unpaid: 0,
+    };
+    for (const o of orders ?? []) {
+      result[o.status] = (result[o.status] ?? 0) + 1;
+      if (needsPayment(o)) result.unpaid += 1;
+    }
+    return result;
+  }, [orders]);
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase().replace(/^#/, "");
+    return (orders ?? []).filter((o) => {
+      if (filter === "unpaid") {
+        if (!needsPayment(o)) return false;
+      } else if (filter !== "all" && o.status !== filter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        String(o.id).includes(q) ||
+        o.customerName.toLowerCase().includes(q) ||
+        o.phone.includes(q)
+      );
+    });
+  }, [orders, filter, search]);
+
+  if (needLogin) {
+    return (
+      <main className="mx-auto max-w-5xl px-4 py-16 text-center">
+        <h1 className="font-heading text-3xl">Quản lý đơn hàng</h1>
+        <p className="mt-3 opacity-70">{error}</p>
+        <Link
+          href="/admin/login?next=/admin/orders"
+          className="mt-6 inline-block rounded-lg bg-ink px-5 py-2.5 text-paper"
+        >
+          Đăng nhập quản trị
+        </Link>
+      </main>
+    );
+  }
+
+  return (
+    <main className="mx-auto max-w-5xl px-4 py-10">
+      {/* Tiêu đề + tìm kiếm */}
+      <motion.div
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="flex flex-wrap items-end justify-between gap-3"
+      >
+        <div>
+          <h1 className="font-heading text-3xl sm:text-4xl">
+            Quản lý đơn hàng
+          </h1>
+          <p className="mt-1 text-sm text-ink/60">
+            Mỗi đơn là một phiếu, xử lý xong thì đóng dấu
+          </p>
+        </div>
+
+        <div className="flex gap-2">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="🔍 Mã đơn, tên, số điện thoại..."
+            className="w-64 rounded-full border border-ink/20 bg-paper px-4 py-2 text-sm outline-none transition focus:border-ink focus:ring-2 focus:ring-ochre/30"
+          />
+          <button
+            type="button"
+            onClick={() => setReloadKey((k) => k + 1)}
+            disabled={refreshing}
+            className="rounded-full border border-ink/20 px-4 py-2 text-sm transition hover:bg-ink hover:text-paper disabled:opacity-60 disabled:hover:bg-transparent disabled:hover:text-ink"
+            aria-label="Tải lại danh sách đơn"
+          >
+            {refreshing ? "Đang tải..." : "↻ Tải lại"}
+          </button>
+        </div>
+      </motion.div>
+
+      {/* Nhãn lọc kèm số đơn */}
+      <div className="mt-6 flex flex-wrap gap-2">
+        {filters.map((f) => {
+          const active = filter === f.value;
+          const count = counts[f.value] ?? 0;
+          const needsAttention =
+            (f.value === "pending" || f.value === "unpaid") && count > 0;
+          return (
+            <motion.button
+              key={f.value}
+              type="button"
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setFilter(f.value)}
+              className={`flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm transition ${
+                active
+                  ? "border-ink bg-ink text-paper shadow"
+                  : "border-ink/20 hover:bg-card"
+              }`}
+            >
+              {f.label}
+              <span
+                className={`relative flex min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold ${
+                  active
+                    ? "bg-paper/20 text-paper"
+                    : needsAttention
+                      ? "bg-ochre text-paper"
+                      : "bg-ink/10 text-ink/70"
+                }`}
+              >
+                {needsAttention && !active && (
+                  <span className="absolute inset-0 animate-ping rounded-full bg-ochre/50" />
+                )}
+                <span className="relative">{orders ? count : "·"}</span>
+              </span>
+            </motion.button>
+          );
+        })}
+      </div>
+
+      {actionError && (
+        <div className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+          {actionError}
+        </div>
+      )}
+
+      {error && <p className="mt-8 text-center text-red-700">{error}</p>}
+
+      {/* Khung chờ khi đang tải */}
+      {!error && orders === null && (
+        <ul className="mt-6 space-y-5">
+          {[0, 1, 2].map((i) => (
+            <li
+              key={i}
+              className="h-40 animate-pulse rounded-2xl border border-ink/10 bg-card"
+            />
+          ))}
+        </ul>
+      )}
+
+      {orders !== null && visible.length === 0 && (
+        <div className="mt-8 rounded-2xl border border-dashed border-ink/20 py-16 text-center">
+          <p className="text-4xl">🧵</p>
+          <p className="mt-3 text-ink/70">
+            {search
+              ? "Không tìm thấy phiếu đơn nào khớp."
+              : "Không có đơn hàng nào ở mục này."}
+          </p>
+        </div>
+      )}
+
+      {orders !== null && visible.length > 0 && (
+        <ul className="mt-6 space-y-5">
+          <AnimatePresence mode="popLayout" initial>
+            {visible.map((order, index) => {
+              const total = orderTotal(order);
+              const parts = moneyParts(order);
+              const saved = parts.discount + parts.shippingDiscount;
+              const unpaid = needsPayment(order);
+              // Đơn chuyển khoản chưa nhận tiền: chỉ được hủy (khớp luật ở API)
+              const baseActions = actions[order.status] ?? [];
+              const orderActions = unpaid
+                ? baseActions.filter((a) => a.to === "cancelled")
+                : baseActions;
+              const isOpen = expanded.has(order.id);
+              const created = new Date(order.createdAt);
+
+              return (
+                <motion.li
+                  key={order.id}
+                  layout
+                  initial={{ opacity: 0, y: 28 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.96 }}
+                  transition={{
+                    duration: 0.45,
+                    delay: Math.min(index, 6) * 0.05,
+                    ease: [0.22, 1, 0.36, 1],
+                  }}
+                  className="relative"
+                >
+                  <div
+                    className={`flex flex-col rounded-2xl border border-ink/10 bg-card shadow-sm transition-shadow hover:shadow-md md:flex-row ${
+                      order.status === "cancelled" ? "opacity-80" : ""
+                    }`}
+                  >
+                    {/* Hai nửa vòng tròn khuyết ở đường xé phiếu */}
+                    <span
+                      aria-hidden
+                      className="absolute -top-2.5 left-[calc(10rem-10px)] z-10 hidden h-5 w-5 rounded-full bg-paper md:block"
+                    />
+                    <span
+                      aria-hidden
+                      className="absolute -bottom-2.5 left-[calc(10rem-10px)] z-10 hidden h-5 w-5 rounded-full bg-paper md:block"
+                    />
+
+                    {/* Cuống phiếu */}
+                    <div className="flex items-center justify-between gap-2 border-b border-dashed border-ink/25 px-5 py-3 md:w-40 md:shrink-0 md:flex-col md:items-start md:justify-center md:gap-1 md:border-b-0 md:border-r md:py-5">
+                      <div>
+                        <p className="text-xs text-ink/50">Mã đơn</p>
+                        <p className="font-heading text-3xl font-semibold leading-tight">
+                          #{order.id}
+                        </p>
+                      </div>
+                      <div className="text-right text-xs text-ink/60 md:text-left">
+                        <p>{created.toLocaleDateString("vi-VN")}</p>
+                        <p>
+                          {created.toLocaleTimeString("vi-VN", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Thân phiếu */}
+                    <div className="min-w-0 flex-1 p-5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-lg font-medium">
+                            {order.customerName}
+                          </p>
+                          <p className="text-sm text-ink/60">{order.phone}</p>
+                        </div>
+
+                        {/* Con dấu trạng thái: đóng xuống mỗi khi đổi trạng thái */}
+                        <motion.span
+                          key={order.status}
+                          initial={{ scale: 2.2, opacity: 0, rotate: -18 }}
+                          animate={{ scale: 1, opacity: 0.92, rotate: -6 }}
+                          transition={{
+                            type: "spring",
+                            stiffness: 420,
+                            damping: 16,
+                          }}
+                          className={`inline-block shrink-0 select-none rounded-md border-4 border-double px-3 py-1 text-xs font-bold uppercase tracking-widest ${
+                            stampStyles[order.status] ?? "border-ink text-ink"
+                          }`}
+                        >
+                          {statusLabels[order.status] ?? order.status}
+                        </motion.span>
+                      </div>
+
+                      <Stitches status={order.status} />
+
+                      {/* Thanh toán */}
+                      <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
+                        <span className="text-ink/60">
+                          {paymentLabels[order.paymentMethod] ??
+                            order.paymentMethod}
+                        </span>
+                        {order.isPaid && (
+                          <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
+                            Đã nhận tiền
+                            {order.paidAt &&
+                              ` · ${new Date(order.paidAt).toLocaleString("vi-VN")}`}
+                          </span>
+                        )}
+                        {unpaid && (
+                          <span className="rounded-full bg-ochre/40 px-2.5 py-0.5 text-xs font-semibold text-ink">
+                            Chờ nhận tiền
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Tóm tắt sản phẩm + tổng tiền */}
+                      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+                        <button
+                          type="button"
+                          onClick={() => toggleExpand(order.id)}
+                          aria-expanded={isOpen}
+                          className="group flex items-center gap-3 text-left"
+                        >
+                          <span className="flex -space-x-2">
+                            {order.orderItems.slice(0, 4).map((item) => (
+                              <span
+                                key={item.id}
+                                className="relative h-9 w-9 overflow-hidden rounded-full bg-paper ring-2 ring-card"
+                              >
+                                {item.product.imageUrl && (
+                                  <Image
+                                    src={item.product.imageUrl}
+                                    alt={item.product.name}
+                                    fill
+                                    sizes="36px"
+                                    className="object-cover"
+                                  />
+                                )}
+                              </span>
+                            ))}
+                            {order.orderItems.length > 4 && (
+                              <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-ink/10 text-xs ring-2 ring-card">
+                                +{order.orderItems.length - 4}
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-sm text-ink/70 group-hover:text-ink">
+                            {order.orderItems.length} sản phẩm{" "}
+                            <span
+                              className={`inline-block transition-transform ${
+                                isOpen ? "rotate-180" : ""
+                              }`}
+                            >
+                              ▾
+                            </span>
+                          </span>
+                        </button>
+
+                        <div className="text-right">
+                          <p className="text-lg font-semibold">
+                            {formatVND(total)}
+                          </p>
+                          {saved > 0 && (
+                            <p className="text-xs text-emerald-800">
+                              Đã trừ giảm giá {formatVND(saved)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Chi tiết: địa chỉ + danh sách sản phẩm + tính tiền */}
+                      <AnimatePresence initial={false}>
+                        {isOpen && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.3 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="mt-4 border-t border-dashed border-ink/20 pt-4">
+                              <p className="whitespace-pre-line text-sm text-ink/70">
+                                📍 {order.address}
+                              </p>
+
+                              <ul className="mt-4 space-y-3">
+                                {order.orderItems.map((item) => (
+                                  <li
+                                    key={item.id}
+                                    className="flex items-center gap-3"
+                                  >
+                                    <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-paper">
+                                      {item.product.imageUrl && (
+                                        <Image
+                                          src={item.product.imageUrl}
+                                          alt={item.product.name}
+                                          fill
+                                          sizes="48px"
+                                          className="object-cover"
+                                        />
+                                      )}
+                                    </div>
+                                    <p className="min-w-0 flex-1 truncate text-sm">
+                                      {item.product.name}
+                                      <span className="opacity-70">
+                                        {" "}
+                                        × {item.quantity}
+                                      </span>
+                                    </p>
+                                    <p className="shrink-0 text-sm">
+                                      {formatVND(
+                                        Number(item.priceAtOrder) *
+                                          item.quantity,
+                                      )}
+                                    </p>
+                                  </li>
+                                ))}
+                              </ul>
+
+                              <dl className="mt-4 space-y-1 border-t border-dashed border-ink/20 pt-3 text-sm">
+                                <div className="flex justify-between gap-4">
+                                  <dt className="text-ink/55">Tiền hàng</dt>
+                                  <dd className="tabular-nums">
+                                    {formatVND(parts.items)}
+                                  </dd>
+                                </div>
+                                <div className="flex justify-between gap-4">
+                                  <dt className="text-ink/55">
+                                    Phí vận chuyển
+                                  </dt>
+                                  <dd className="tabular-nums">
+                                    {formatVND(parts.shipping)}
+                                  </dd>
+                                </div>
+                                {parts.discount > 0 && (
+                                  <div className="flex justify-between gap-4 text-emerald-800">
+                                    <dt>Giảm giá đơn hàng</dt>
+                                    <dd className="tabular-nums">
+                                      -{formatVND(parts.discount)}
+                                    </dd>
+                                  </div>
+                                )}
+                                {parts.shippingDiscount > 0 && (
+                                  <div className="flex justify-between gap-4 text-emerald-800">
+                                    <dt>Giảm phí vận chuyển</dt>
+                                    <dd className="tabular-nums">
+                                      -{formatVND(parts.shippingDiscount)}
+                                    </dd>
+                                  </div>
+                                )}
+                                <div className="flex justify-between gap-4 border-t border-ink/10 pt-2 font-semibold">
+                                  <dt>Khách phải trả</dt>
+                                  <dd className="tabular-nums">
+                                    {formatVND(total)}
+                                  </dd>
+                                </div>
+                              </dl>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      {/* Nút xử lý */}
+                      <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-ink/10 pt-4">
+                        {unpaid ? (
+                          <span className="mr-auto text-sm text-ink/55">
+                            Chờ khách chuyển {formatVND(total)}, xác nhận khi
+                            tiền đã về tài khoản
+                          </span>
+                        ) : (
+                          orderActions.length === 0 && (
+                            <span className="mr-auto text-sm text-ink/50">
+                              ✓ Đơn đã kết thúc
+                            </span>
+                          )
+                        )}
+
+                        <Link
+                          href={`/admin/orders/${order.id}/invoice`}
+                          target="_blank"
+                          className="rounded-full border border-ink/20 px-5 py-2 text-sm font-medium transition hover:bg-ink hover:text-paper"
+                        >
+                          🖨 In hóa đơn
+                        </Link>
+
+                        {unpaid && (
+                          <motion.button
+                            type="button"
+                            whileHover={{ y: -2 }}
+                            whileTap={{ scale: 0.95 }}
+                            disabled={busyId === order.id}
+                            onClick={() => confirmPayment(order)}
+                            className="rounded-full bg-ochre px-5 py-2 text-sm font-semibold text-ink shadow transition hover:shadow-md disabled:opacity-50"
+                          >
+                            {busyId === order.id
+                              ? "Đang xử lý..."
+                              : "Xác nhận đã nhận tiền"}
+                          </motion.button>
+                        )}
+
+                        {orderActions.map((a) => (
+                          <motion.button
+                            key={a.to}
+                            type="button"
+                            whileHover={{ y: -2 }}
+                            whileTap={{ scale: 0.95 }}
+                            disabled={busyId === order.id}
+                            onClick={() => changeStatus(order, a.to)}
+                            className={`rounded-full px-5 py-2 text-sm font-medium transition disabled:opacity-50 ${
+                              a.danger
+                                ? "border border-red-700 text-red-700 hover:bg-red-700 hover:text-white"
+                                : "bg-ink text-paper shadow hover:shadow-md"
+                            }`}
+                          >
+                            {busyId === order.id ? "Đang xử lý..." : a.label}
+                          </motion.button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </motion.li>
+              );
+            })}
+          </AnimatePresence>
+        </ul>
+      )}
+    </main>
+  );
+}
+</file>
+
+</files>
